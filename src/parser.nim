@@ -33,5 +33,12 @@ proc parseModule*(ps: var Parser; b: var Builder) =
   ps.emitInfo(b, 1, 0, 0, 0, true)   # module stmts: absolute (col 0, line 1, file)
   var i = 0
   while ps.tok(i).kind != tkEof:
-    i = ps.parseStmt(b, i, 1, 0)
+    let t = ps.tok(i)
+    if t.kind == tkKeyword and t.s == "type":
+      # Top-level `type` sections route to parse_type.nim. (Nested type
+      # sections in routine bodies re-enter via parseStmt, whose `type`
+      # dispatch is owned by parse_stmt.nim.)
+      i = ps.parseTypeSection(b, i, 1, 0)
+    else:
+      i = ps.parseStmt(b, i, 1, 0)
   b.endTree()

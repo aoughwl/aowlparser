@@ -181,3 +181,4 @@ proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
 proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32): int
 # parse_type.nim implements:
 proc parseType(ps: var Parser; b: var Builder; idx: int; pl, pc: int32): int
+proc parseTypeSection(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int
