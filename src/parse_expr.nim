@@ -1,7 +1,7 @@
-## parse_expr.nim — EXPRESSIONS & OPERATORS (owned by the expressions agent).
+## parse_expr.nim — EXPRESSIONS & OPERATORS.
 ##
-## Spliced after parsecore.nim (and parse_type.nim / parse_stmt.nim resolve
-## against `parseExprRange` via the forward decl in parsecore.nim).
+## Spliced after parsecore.nim (parse_type.nim / parse_stmt.nim resolve against
+## `parseExprRange` via the forward decl in parsecore.nim).
 ##
 ## Expression strategy: a token-range splitter. `parseExprRange [lo,hi)` finds the
 ## lowest-precedence depth-0 binary operator (rightmost = left-assoc) and emits
@@ -10,7 +10,7 @@
 ## grouping/prefix, plus HIGH-PRECEDENCE POSTFIX chains (`.`/`[]`/`{}`/`()`) and
 ## keyword-led forms (`nil`/`cast`/`addr`/`if`). Constructors (`bracket`/`curly`/
 ## `tup`/`par`/`oconstr`/`tabconstr`) and named args (`kv`/`vv`) live here too.
-## See nifler-nif-spec.md §3. Line-info is emitted relative to parent via emitInfo.
+## Line-info is emitted relative to the parent node via `emitInfo`.
 
 # postfix kinds
 const
@@ -455,12 +455,7 @@ proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       b.addTree "cmd"
       ps.emitInfo(b, callee.line, callee.col, pl, pc, false)
       ps.parseExprRange(b, lo, int32(ce), callee.line, callee.col)
-      let starts = ps.splitArgs(ce, int(hi))
-      for ai in 0 ..< starts.len:
-        let aLo = starts[ai]
-        let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: int(hi)
-        if aLo < aHi:
-          ps.parseArg(b, int32(aLo), int32(aHi), callee.line, callee.col)
+      ps.parseArgList(b, int32(ce), hi, callee.line, callee.col)
       b.endTree()
     else:
       ps.parsePrimaryRange(b, lo, hi, pl, pc)

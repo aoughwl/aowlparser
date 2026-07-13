@@ -1,20 +1,19 @@
-## parse_stmt.nim — STATEMENTS, CONTROL FLOW, var/let/const SECTIONS
-## (owned by the statements agent).
+## parse_stmt.nim — STATEMENTS, CONTROL FLOW, var/let/const SECTIONS.
 ##
 ## Spliced LAST (after parse_expr.nim and parse_type.nim), so it can call
 ## `parseExprRange`, `parseType`, `parseRoutine` directly. `parseStmt` is the
 ## dispatch entry (forward-declared in parsecore.nim) — routine bodies and the
 ## module loop re-enter through it.
 ##
-## Currently: expr/command/assignment statements, return-like (ret/discard/raise/
-## yld), import-like. EXTEND HERE: `if`/`elif`/`else`, `case`+`(of (ranges …) …)`,
-## `while`, `for`+`(unpackflat (let …))` / `(unpacktup …)`, `try`/`except`/`fin`,
-## `when`, `block`/`break`/`continue`, `defer`; and var/let/const SECTIONS which
-## emit NO wrapper — each ident-def is its own sibling with type & value
-## DUPLICATED across a multi-name group (`(var name . pragma type value)`), plus
-## var-tuple `(unpackdecl value (unpacktup (let …)…))`. See nifler-nif-spec.md §4.
-## Indentation-delimited blocks: use `ps.tok(i).indent > refIndent` like
-## parseRoutine's body loop.
+## Covers: expr/command/assignment statements; return-like (ret/discard/raise/
+## yld) and import-like forms; the control-flow keywords `if`/`elif`/`else`,
+## `case`+`(of (ranges …) …)`, `while`, `for`+`(unpackflat …)` / `(unpacktup …)`,
+## `try`/`except`/`fin`, `when`, `block`/`break`/`continue`, `defer`, `static`;
+## and var/let/const SECTIONS, which emit NO wrapper node — each ident-def is its
+## own sibling with the type & value DUPLICATED across a multi-name group
+## (`(var name . pragma type value)`), plus the var-tuple form
+## `(unpackdecl value (unpacktup (let …)…))`. Indentation-delimited blocks
+## threshold on `ps.tok(i).indent` (see `emitBody`).
 
 proc parseCommand(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   let callee = ps.tok(int(lo))
@@ -22,12 +21,7 @@ proc parseCommand(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   b.addTree "cmd"
   ps.emitInfo(b, callee.line, callee.col, pl, pc, false)   # cmd node info = callee pos
   ps.parseExprRange(b, lo, int32(ce), callee.line, callee.col)   # callee (may be dotted)
-  let starts = ps.splitArgs(ce, int(hi))
-  for ai in 0 ..< starts.len:
-    let aLo = starts[ai]
-    let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: int(hi)
-    if aLo < aHi:
-      ps.parseArg(b, int32(aLo), int32(aHi), callee.line, callee.col)
+  ps.parseArgList(b, int32(ce), hi, callee.line, callee.col)
   b.endTree()
 
 proc parseExprStmt(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32): int =
@@ -701,12 +695,7 @@ proc parsePostExprBlock(ps: var Parser; b: var Builder; headLo, colonIdx: int;
     b.addTree "cmd"
     ps.emitInfo(b, head.line, head.col, pl, pc, false)
     ps.parseExprRange(b, int32(headLo), int32(ce), head.line, head.col)   # callee
-    let starts = ps.splitArgs(ce, colonIdx)
-    for ai in 0 ..< starts.len:
-      let aLo = starts[ai]
-      let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: colonIdx
-      if aLo < aHi:
-        ps.parseArg(b, int32(aLo), int32(aHi), head.line, head.col)
+    ps.parseArgList(b, int32(ce), int32(colonIdx), head.line, head.col)
     result = ps.emitBody(b, colonIdx, refIndent, head.line, head.col)     # (stmts body) arg
     b.endTree()
   else:

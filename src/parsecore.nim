@@ -4,16 +4,14 @@
 ## token-cursor helpers, line-info emission, operator classification, and the
 ## range-scanning utilities that every grammar area builds on.
 ##
-## PARALLEL-WORK CONTRACT: the grammar is split across sibling include files —
+## MODULE LAYOUT: the grammar is split across sibling include files —
 ##   parse_expr.nim   (expressions / operators / constructors)
 ##   parse_stmt.nim   (statements, control flow, var/let/const sections)
 ##   parse_type.nim   (type defs, routine/proc defs, params, pragmas)
-## Each is owned by ONE agent and spliced (via `include`) AFTER this file, in the
-## order expr → type → stmt. Cross-file calls resolve through the forward
-## declarations at the bottom of this file. If your area needs to be called from
-## another area's file, ADD a forward decl to the block marked FORWARD DECLS
-## below (append-only; that is the ONLY shared edit point). Do not edit another
-## area's file.
+## They are spliced (via `include`) AFTER this file, in the order expr → type →
+## stmt. Cross-file calls resolve through the forward declarations in the block
+## marked FORWARD DECLS at the bottom of this file — extend it when a proc in one
+## area must be called from another before it is defined.
 
 type
   Parser* = object
@@ -39,7 +37,7 @@ proc isCloseBracket(k: TokKind): bool =
   k == tkParRi or k == tkBracketRi or k == tkCurlyRi
 
 # ---------------------------------------------------------------------------
-# line-info emission (mirrors bridge.nim relLineInfo / absLineInfo)
+# line-info emission (relative to parent node, or absolute at the module root)
 # ---------------------------------------------------------------------------
 
 proc emitInfo(ps: Parser; b: var Builder; nl, nc, pl, pc: int32; root: bool) =
@@ -47,12 +45,6 @@ proc emitInfo(ps: Parser; b: var Builder; nl, nc, pl, pc: int32; root: bool) =
     b.attachLineInfo(nc, nl, ps.file)
   else:
     b.attachLineInfo(nc - pc, nl - pl, "")
-
-proc tokWidth(t: Token): int32 =
-  ## Source width of a token, used only for postfix adjacency (`a.b(`, `x[`).
-  case t.kind
-  of tkIdent, tkKeyword, tkOperator: int32(t.s.len)
-  else: 1'i32
 
 proc opIsInfix(ps: Parser; i, lo: int): bool =
   ## Whether the binary-capable operator at `i` is used INFIX (vs prefix) here.

@@ -384,7 +384,6 @@ proc lexNumber(lx: var Lexer): Token =
     # integer / unsigned suffix (i8/i16/i32/i64/u/u8/u16/u32/u64)
     result.suffix = sufl
 
-  result.base = int32(base)
   if isFloat:
     result.kind = tkFloatLit
     if floatText.len == 0: floatText = digits
@@ -467,6 +466,19 @@ proc skipBlockComment(lx: var Lexer) =
     else:
       advance lx
 
+proc skipDocBlockComment(lx: var Lexer) =
+  ## `##[ ... ]##` doc block comment, nesting-aware (nests on `##[`, closes on
+  ## `]##`). Matches the classic lexer's `skipMultiLineComment(isDoc=true)`.
+  advance lx; advance lx; advance lx # '##['
+  var depth = 1
+  while lx.pos < lx.n and depth > 0:
+    if lx.cur == '#' and lx.peek(1) == '#' and lx.peek(2) == '[':
+      advance lx; advance lx; advance lx; inc depth
+    elif lx.cur == ']' and lx.peek(1) == '#' and lx.peek(2) == '#':
+      advance lx; advance lx; advance lx; dec depth
+    else:
+      advance lx
+
 proc tokenize*(src: string): seq[Token] =
   ## Produce the full token list terminated by a `tkEof`. Whitespace and
   ## comments are consumed; the off-side `indent` field marks first-on-line
@@ -483,6 +495,16 @@ proc tokenize*(src: string): seq[Token] =
     elif c == '#':
       if lx.peek(1) == '[':
         skipBlockComment(lx)
+      elif lx.peek(1) == '#' and lx.peek(2) == '[':
+        # `##[ … ]##` doc block comment. Like a standalone `##` doc comment,
+        # nifler emits a line-leading one as `(comment)` and drops a trailing
+        # one. We skip the whole (possibly nested) block, keeping only a
+        # line-leading token.
+        let standalone = lx.atLineStart
+        let t = startToken(lx, tkComment)
+        skipDocBlockComment(lx)
+        lx.atLineStart = false
+        if standalone: result.add t
       elif lx.peek(1) == '#':
         # `##` doc comment. Nifler makes a standalone one (at statement position,
         # i.e. first token on its line) an `nkCommentStmt` → `(comment)`; a

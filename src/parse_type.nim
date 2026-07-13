@@ -1,5 +1,4 @@
-## parse_type.nim — TYPE DEFS, ROUTINE DEFS, PARAMS, GENERICS, PRAGMAS
-## (owned by the type/proc/pragma agent).
+## parse_type.nim — TYPE DEFS, ROUTINE DEFS, PARAMS, GENERICS, PRAGMAS.
 ##
 ## Spliced after parse_expr.nim, before parse_stmt.nim. `parseType` /
 ## `parseTypeSection` are the cross-file entries (forward-declared in
@@ -7,8 +6,7 @@
 ## parsecore.nim, implemented in parse_stmt.nim).
 ##
 ## Emits NIF matching classic nifler byte-for-byte on supported constructs;
-## structural (line-info-stripped) equality is the pass criterion. See
-## nifler-nif-spec.md §5–7.
+## structural (line-info-stripped) equality is the pass criterion.
 
 # --- local forward declarations (mutual recursion inside this file) ----------
 proc parseTypeRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
@@ -29,9 +27,7 @@ proc isPrefixTypeKw(s: string): bool =
   s == "ref" or s == "ptr" or s == "var" or s == "out" or s == "distinct"
 
 proc prefixTypeTag(s: string): string =
-  if s == "var": "mut"
-  elif s == "out": "out"
-  else: s
+  if s == "var": "mut" else: s   # ref/ptr/out/distinct map to their own spelling
 
 proc typeExprEnd(ps: var Parser; lo: int): int =
   ## End (exclusive) of an inline type expression starting at `lo`. Stops at a

@@ -1,10 +1,8 @@
-## tokens.nim — the Token contract for nifront.
+## tokens.nim — the Token contract shared by the lexer and parser.
 ##
-## This module DEFINES the lexer<->parser interface. The stub lexer
-## (`lexer.nim`) and the recursive-descent parser (`parser.nim`) both agree on
-## the `Token` shape here. A future dedicated lexer agent is expected to EXTEND
-## `TokKind` and fill in `iVal`/`fVal`/`base`/`suffix` for the full Nim number
-## and string grammar, without changing the fields the parser already reads.
+## This module DEFINES the lexer<->parser interface: `lexer.nim` produces the
+## `Token` stream and `parser.nim` (with its `include`d grammar files) consumes
+## it. Both agree on the `Token` shape here.
 ##
 ## Design notes
 ## ------------
@@ -12,10 +10,9 @@
 ##   field: a token that is the first non-whitespace token on its source line
 ##   records its column in `indent`; every other token has `indent == -1`.
 ##   That lets the parser implement the off-side rule without a separate
-##   Indent/Dedent token kind (an explicit `tkNewline` is still provided for a
-##   lexer that prefers to emit layout tokens).
+##   Indent/Dedent token kind.
 ## * `line` is 1-based, `col` is 0-based — matching nimony's `TLineInfo` so the
-##   NIF line-info diffs the parser emits line up with native nifler.
+##   NIF line-info the parser emits lines up with native nifler.
 
 type
   TokKind* = enum
@@ -40,22 +37,19 @@ type
     tkColon          ## :
     tkDot            ## .
     tkComment        ## a `##` doc comment (regular `#` comments are skipped)
-    tkNewline        ## significant line break (optional; see module notes)
 
   Token* = object
     kind*: TokKind
     s*: string       ## identifier / operator / decoded string literal text
     iVal*: int64     ## integer or char-literal value
     fVal*: float     ## float-literal value
-    base*: int32     ## numeric literal base (10 by default); reserved for lexer
-    suffix*: string  ## numeric/string literal type suffix, e.g. "i8" (reserved)
+    suffix*: string  ## numeric literal type suffix, e.g. "i8"
     line*: int32     ## 1-based source line
     col*: int32      ## 0-based source column
     endCol*: int32   ## 0-based column just past the token (for spacing checks)
     indent*: int32   ## column if first token on its line, else -1
     quoted*: bool    ## accent-quoted identifier (`` `foo bar` ``)
     parts*: seq[string]  ## child pieces of an accent-quoted ident (accQuoted rule)
-    docComment*: bool    ## a `##` doc comment (kept, not skipped like `#`)
 
 const
   Keywords* = [
@@ -75,5 +69,5 @@ proc isKeyword*(s: string): bool =
   return false
 
 proc initToken*(kind: TokKind; line, col: int32): Token =
-  result = Token(kind: kind, s: "", iVal: 0, fVal: 0.0, base: 10,
+  result = Token(kind: kind, s: "", iVal: 0, fVal: 0.0,
                  suffix: "", line: line, col: col, endCol: col, indent: -1)

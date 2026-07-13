@@ -1,11 +1,10 @@
 ## parser.nim — recursive-descent parser that emits NIF DIRECTLY via nifbuilder,
-## matching classic `nifler`'s output (see nifler-nif-spec.md / bridge.nim).
+## matching classic `nifler`'s output.
 ##
-## This module is a THIN aggregator. The grammar is split across include files so
-## multiple agents can each own one area with zero merge conflicts:
+## This module is a THIN aggregator. The grammar is split across include files:
 ##
 ##   parsecore.nim   — Parser type, token cursor, line-info, op tables, range scan,
-##                     and the cross-file FORWARD DECLS (the only shared edit point)
+##                     and the cross-file FORWARD DECLS
 ##   parse_expr.nim  — expressions / operators / constructors
 ##   parse_type.nim  — type defs, routine/proc defs, params, pragmas
 ##   parse_stmt.nim  — statements, control flow, var/let/const sections
@@ -16,8 +15,8 @@
 ## Fused parse + emit: constructs are written to the `Builder` as recognised, with
 ## bounded lookahead over the flat token list — no PNode AST (object-variant ref
 ## trees crash nimony's field magics). Line-info suffixes are emitted relative to
-## each node's parent (bridge.nim `relLineInfo`) so output matches native nifler
-## byte-for-byte on supported constructs.
+## each node's parent so output matches native nifler byte-for-byte on supported
+## constructs.
 
 import tokens
 import nifbuilder
