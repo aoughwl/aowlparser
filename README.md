@@ -11,9 +11,9 @@ symbol comes out as a bare identifier. `nifparser` reproduces that output
 without depending on the classic-Nim compiler.
 
 > Status: **broad grammar coverage.** The curated corpus (47 files) matches
-> native nifler **byte-for-byte** (46 exact / 1 structural), and 12 of the 29
+> native nifler **byte-for-byte** (46 exact / 1 structural), and **all 29**
 > real `nimony/src/lib` modules now match **byte-structurally** end-to-end
-> (line-info stripped), with the rest close. `tests/stress.sh` runs the
+> (line-info stripped) — the whole real standard library, zero mismatches. `tests/stress.sh` runs the
 > differential harness over arbitrary real `.nim` files.
 >
 > Covered: full lexer (number bases, typed-literal `(suf …)`, raw/triple
