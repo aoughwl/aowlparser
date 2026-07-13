@@ -39,6 +39,7 @@ type
     tkSemicolon      ## ;
     tkColon          ## :
     tkDot            ## .
+    tkComment        ## a `##` doc comment (regular `#` comments are skipped)
     tkNewline        ## significant line break (optional; see module notes)
 
   Token* = object
@@ -50,7 +51,11 @@ type
     suffix*: string  ## numeric/string literal type suffix, e.g. "i8" (reserved)
     line*: int32     ## 1-based source line
     col*: int32      ## 0-based source column
+    endCol*: int32   ## 0-based column just past the token (for spacing checks)
     indent*: int32   ## column if first token on its line, else -1
+    quoted*: bool    ## accent-quoted identifier (`` `foo bar` ``)
+    parts*: seq[string]  ## child pieces of an accent-quoted ident (accQuoted rule)
+    docComment*: bool    ## a `##` doc comment (kept, not skipped like `#`)
 
 const
   Keywords* = [
@@ -71,4 +76,4 @@ proc isKeyword*(s: string): bool =
 
 proc initToken*(kind: TokKind; line, col: int32): Token =
   result = Token(kind: kind, s: "", iVal: 0, fVal: 0.0, base: 10,
-                 suffix: "", line: line, col: col, indent: -1)
+                 suffix: "", line: line, col: col, endCol: col, indent: -1)

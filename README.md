@@ -10,10 +10,42 @@ parser) → NIF`, with **no** semantic checking and no symbol resolution. Every
 symbol comes out as a bare identifier. `nifparser` reproduces that output
 without depending on the classic-Nim compiler.
 
-> Status: **bootstrap skeleton.** The parser spine + emit plumbing + the
-> differential harness are in place, and the trivial corpus already matches
-> native nifler **byte-for-byte**. Most of the grammar is still to be filled in
-> — see the checklist at the bottom.
+> Status: **broad grammar coverage.** The curated corpus (47 files) matches
+> native nifler **byte-for-byte** (46 exact / 1 structural), and 12 of the 29
+> real `nimony/src/lib` modules now match **byte-structurally** end-to-end
+> (line-info stripped), with the rest close. `tests/stress.sh` runs the
+> differential harness over arbitrary real `.nim` files.
+>
+> Covered: full lexer (number bases, typed-literal `(suf …)`, raw/triple
+> strings, backtick-quoted idents → `(quoted …)`, `##` doc comments →
+> `(comment …)`), expressions & operators (Nim precedence incl. assignment
+> ops, spacing-based prefix/infix disambiguation, `-N` literal folding,
+> `ident"…"` call-string-literals, `cast`/`addr`, postfix chains), command
+> syntax in statement/expression/type position (incl. prefix-op args and
+> dotted callees), `if`/`elif`/`else`/`while`/`for`/`case`/`try`/`block`/
+> `when`/`static`/`defer` (multi-line **and** one-liner forms), `;`-separated
+> statements, StmtListExpr `( … ; … )`, var/let/const sections (pragmas,
+> tuple-unpack), type/proc/enum/object defs, anonymous `proc` expressions,
+> `from … import`, and statement/decl pragmas. Remaining gaps live in the
+> largest modules (anonymous-proc edge cases, `concept` bodies, some deep
+> postfix orderings) — see the checklist at the bottom.
+
+### Experimental: curly-brace blocks (`--curly`)
+
+Off by default (so output stays nifler-compatible). With `--curly`, a
+`{ … }` block body is accepted **anywhere** a `:` body is, and the two may be
+mixed freely:
+
+```nim
+if c { echo a } else: echo b      # brace + colon, mixed
+while x { dec x; use x }           # `;`-separated statements inside braces
+```
+
+A block `{` is the first depth-0 `{` (not a `{.` pragma) that follows an
+operand (`if c {`) or a bodiless-block keyword (`else {`, `try {`, `block {`,
+`finally {`, `defer {`), so a set literal in the head (`if {1} == x { … }`) is
+not mistaken for the body. This is a nifparser extension; native nifler has no
+equivalent.
 
 ---
 

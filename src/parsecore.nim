@@ -19,9 +19,10 @@ type
   Parser* = object
     toks: seq[Token]
     file: string
+    curly*: bool   ## experimental: accept `{ … }` as a block body alongside `:`
 
-proc initParser*(toks: seq[Token]; file: string): Parser =
-  Parser(toks: toks, file: file)
+proc initParser*(toks: seq[Token]; file: string; curly = false): Parser =
+  Parser(toks: toks, file: file, curly: curly)
 
 # ---------------------------------------------------------------------------
 # token helpers
@@ -46,6 +47,80 @@ proc emitInfo(ps: Parser; b: var Builder; nl, nc, pl, pc: int32; root: bool) =
     b.attachLineInfo(nc, nl, ps.file)
   else:
     b.attachLineInfo(nc - pc, nl - pl, "")
+
+proc tokWidth(t: Token): int32 =
+  ## Source width of a token, used only for postfix adjacency (`a.b(`, `x[`).
+  case t.kind
+  of tkIdent, tkKeyword, tkOperator: int32(t.s.len)
+  else: 1'i32
+
+proc opIsInfix(ps: Parser; i, lo: int): bool =
+  ## Whether the binary-capable operator at `i` is used INFIX (vs prefix) here.
+  ## Mirrors Nim's spacing rule: an operator with leading space but no trailing
+  ## space (`f $v`, `echo -x`) is a PREFIX operator, not an infix split point.
+  if i <= lo: return false                     # leading operator is always prefix
+  let t = ps.tok(i)
+  let prev = ps.tok(i - 1)
+  let nxt = ps.tok(i + 1)
+  let leadSpace = t.line != prev.line or t.col > prev.endCol
+  let trailSpace = nxt.line != t.line or nxt.col > t.endCol
+  if leadSpace and not trailSpace: return false
+  result = true
+
+proc startsArg(ps: Parser; i, hi: int): bool =
+  ## Whether token `i` can begin a command argument: an expression atom, or a
+  ## prefix operator directly attached to its operand (`$v`, `@x`, `-1`).
+  let t = ps.tok(i)
+  if t.kind == tkOperator:
+    if i + 1 >= hi: return false
+    let nxt = ps.tok(i + 1)
+    return nxt.line == t.line and nxt.col == t.endCol   # adjacent operand
+  result = startsExpr(t) and not isBinaryOp(t)
+
+proc cmdCalleeEnd(ps: Parser; lo, hi: int): int =
+  ## End (exclusive) of the callee *primary* of a possible command call —
+  ## the maximal postfix chain `head (.name | ADJACENT [..]/{..}/(..))*`. What
+  ## remains in `[result, hi)` is the space-separated argument list, if any.
+  var i = lo
+  var endCol: int32
+  if isOpenBracket(ps.tok(i).kind):
+    let c = ps.matchClose(i)
+    endCol = ps.tok(c).endCol
+    i = c + 1
+  else:
+    endCol = ps.tok(i).endCol
+    inc i
+  while i < hi:
+    let t = ps.tok(i)
+    if t.kind == tkDot and i + 1 < hi:
+      let nm = ps.tok(i + 1)
+      endCol = nm.endCol
+      i += 2
+    elif isOpenBracket(t.kind) and t.line == ps.tok(i-1).line and t.col == endCol:
+      let c = ps.matchClose(i)
+      endCol = ps.tok(c).endCol
+      i = c + 1
+    elif (t.kind == tkStrLit or t.kind == tkRStrLit or t.kind == tkTripleStrLit) and
+         t.line == ps.tok(i-1).line and t.col == endCol:
+      # `ident"…"` generalized call-string-literal is a postfix, not a command.
+      endCol = t.col            # nothing normally follows; block further adjacency
+      inc i
+    else:
+      break
+  result = i
+
+proc emitName(ps: Parser; b: var Builder; t: Token; pl, pc: int32) =
+  ## Emit an identifier atom, or `(quoted <pieces>)` for an accent-quoted ident
+  ## (nifler keeps accent-quoting structural — see lexer `lexBackquotedIdent`).
+  if t.quoted:
+    b.addTree "quoted"
+    ps.emitInfo(b, t.line, t.col, pl, pc, false)
+    for p in t.parts:
+      b.addIdent p
+    b.endTree()
+  else:
+    b.addIdent t.s
+    ps.emitInfo(b, t.line, t.col, pl, pc, false)
 
 # ---------------------------------------------------------------------------
 # operator classification
@@ -72,15 +147,25 @@ proc precedenceOf(t: Token): int =
     of "or", "xor": return 3
     else: return 5
   if t.s == "..": return 6
-  let c = if t.s.len > 0: t.s[0] else: ' '
+  if t.s.len == 0: return 2
+  # arrow-like operators (`->`, `~>`, `=>`) bind loosest → 0
+  if t.s.len > 1 and t.s[t.s.len-1] == '>' and
+     (t.s[t.s.len-2] == '-' or t.s[t.s.len-2] == '~' or t.s[t.s.len-2] == '='):
+    return 0
+  let c = t.s[0]
+  # operators ending in `=` (but not the comparison group below) are assignment
+  # operators and bind loosest (`+=`, `*=`, …) → 1. Mirrors Nim getPrecedence.
+  let asgn = t.s[t.s.len-1] == '='
   case c
-  of '$', '^': return 10
-  of '*', '/', '%', '\\': return 9
-  of '+', '-', '~', '|': return 8
-  of '&': return 7
+  of '$', '^': return (if asgn: 1 else: 10)
+  of '*', '/', '%', '\\': return (if asgn: 1 else: 9)
+  of '~': return 8
+  of '+', '-', '|': return (if asgn: 1 else: 8)
+  of '&': return (if asgn: 1 else: 7)
   of '=', '<', '>', '!': return 5
-  of '@', ':', '?': return 2
-  else: return 6
+  of '.': return (if asgn: 1 else: 6)
+  of '?': return 2
+  else: return (if asgn: 1 else: 2)
 
 proc startsExpr(t: Token): bool =
   case t.kind
@@ -94,19 +179,36 @@ proc startsExpr(t: Token): bool =
 # range scanning
 # ---------------------------------------------------------------------------
 
+proc continuesLine(prev: Token): bool =
+  ## Whether a logical line continues onto the next physical line because `prev`
+  ## (the last token before the newline) cannot legally end a statement: a
+  ## trailing binary/assignment operator, a comma, or a dot.
+  case prev.kind
+  of tkComma, tkOperator, tkDot: true
+  of tkKeyword: isBinaryOp(prev)
+  else: false
+
 proc lineEnd(ps: Parser; startIdx: int): int =
   ## First token index at or after `startIdx` that begins a new logical line at
-  ## paren-depth 0 (or EOF). Continuations inside brackets keep the same line.
-  let startLine = ps.tok(startIdx).line
+  ## paren-depth 0 (or EOF). Continuations inside brackets — and after a trailing
+  ## operator/comma/dot (`continuesLine`) — keep the same logical line.
   var i = startIdx
   var depth = 0
   while ps.tok(i).kind != tkEof:
     let t = ps.tok(i)
+    # A new physical line at depth 0 ends the logical line UNLESS the previous
+    # token forces a continuation (a trailing binary/assign operator, comma, or
+    # dot — you cannot end a Nim statement on one). Inside brackets (depth>0) a
+    # newline is always a continuation. Checked BEFORE the bracket tally so a
+    # `{`/`[`/`(` that *starts* the next line (e.g. a following `{.pop.}`) does
+    # not glue the next line on.
+    if depth == 0 and i > startIdx:
+      let prev = ps.tok(i - 1)
+      if t.line != prev.line and not continuesLine(prev):
+        break
     if isOpenBracket(t.kind): inc depth
     elif isCloseBracket(t.kind):
       if depth > 0: dec depth
-    if depth == 0 and t.line != startLine:
-      break
     inc i
   result = i
 
@@ -134,7 +236,7 @@ proc findSplit(ps: Parser; lo, hi: int): int =
     if isOpenBracket(t.kind): inc depth
     elif isCloseBracket(t.kind):
       if depth > 0: dec depth
-    elif depth == 0 and i > lo and isBinaryOp(t):
+    elif depth == 0 and i > lo and isBinaryOp(t) and ps.opIsInfix(i, lo):
       let p = precedenceOf(t)
       if p <= bestPrec:
         bestPrec = p
@@ -178,7 +280,11 @@ proc splitArgs(ps: Parser; lo, hi: int): seq[int] =
 # parse_expr.nim implements:
 proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
 # parse_stmt.nim implements:
-proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32): int
+proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
+               hiLimit: int): int
+proc parseTry(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int
+proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
+                  tag: string): int
 # parse_type.nim implements:
 proc parseType(ps: var Parser; b: var Builder; idx: int; pl, pc: int32): int
 proc parseTypeSection(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int

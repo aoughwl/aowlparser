@@ -40,5 +40,5 @@ proc parseModule*(ps: var Parser; b: var Builder) =
       # dispatch is owned by parse_stmt.nim.)
       i = ps.parseTypeSection(b, i, 1, 0)
     else:
-      i = ps.parseStmt(b, i, 1, 0)
+      i = ps.parseStmt(b, i, 1, 0, -1)
   b.endTree()

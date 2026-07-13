@@ -15,7 +15,7 @@ import std/[syncio, os]
 import nifbuilder
 import tokens, lexer, parser
 
-proc parseToFile(inp, outp, fileField: string) =
+proc parseToFile(inp, outp, fileField: string; curly: bool) =
   var src = ""
   try:
     src = readFile(inp)
@@ -23,18 +23,25 @@ proc parseToFile(inp, outp, fileField: string) =
     write stderr, "cannot read file: " & inp & "\n"
     quit 1
   let toks = tokenize(src)
-  var ps = initParser(toks, fileField)
+  var ps = initParser(toks, fileField, curly)
   var b = nifbuilder.open(outp)
   parseModule(ps, b)
   b.close()
 
 proc usage() =
   write stderr, "nifparser — Nim source -> NIF (nifler-compatible)\n"
-  write stderr, "usage: nifparser p <in.nim> [out.p.nif]\n"
+  write stderr, "usage: nifparser [--curly] p <in.nim> [out.p.nif]\n"
+  write stderr, "  --curly   experimental: also accept `{ … }` block bodies\n"
   quit 1
 
 proc main() =
-  let params = commandLineParams()
+  # Collect positional args, filtering the optional `--curly` flag.
+  var params: seq[string] = @[]
+  var curly = false
+  let cli = commandLineParams()
+  for ci in 0 ..< cli.len:
+    if cli[ci] == "--curly": curly = true
+    else: params.add cli[ci]
   if params.len < 2:
     usage()
   let action = params[0]
@@ -53,6 +60,6 @@ proc main() =
   # `fileField` is the path written into NIF line-info suffixes. nifler uses the
   # cwd-relative path (portablePaths); the harness invokes both tools with the
   # same relative path, so pass the input arg through verbatim.
-  parseToFile(inp, outp, inp)
+  parseToFile(inp, outp, inp, curly)
 
 main()
