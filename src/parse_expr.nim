@@ -88,8 +88,11 @@ proc parseArgList(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
     if aLo < aHi:
       ps.parseArg(b, int32(aLo), int32(aHi), pl, pc)
 
-proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32;
+                 bare: bool) =
   ## Single-line `if C: A (elif C: A)* (else: B)` -> `(if (elif C (stmts A))...)`.
+  ## `bare` (only for the result of a parenthesized StmtListExpr) emits the
+  ## branch bodies as bare expressions instead of `(stmts …)`.
   let ifTok = ps.tok(int(lo))
   b.addTree "if"
   ps.emitInfo(b, ifTok.line, ifTok.col, pl, pc, false)   # if node = 'if' kw pos
@@ -118,10 +121,13 @@ proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       b.addTree "else"
       ps.emitInfo(b, kw.line, kw.col, ifTok.line, ifTok.col, false)
       let bt = ps.tok(bodyLo)
-      b.addTree "stmts"
-      ps.emitInfo(b, bt.line, bt.col, kw.line, kw.col, false)
-      ps.parseExprRange(b, int32(bodyLo), int32(nxt), bt.line, bt.col)
-      b.endTree()
+      if bare:
+        ps.parseExprRange(b, int32(bodyLo), int32(nxt), kw.line, kw.col)
+      else:
+        b.addTree "stmts"
+        ps.emitInfo(b, bt.line, bt.col, kw.line, kw.col, false)
+        ps.parseExprRange(b, int32(bodyLo), int32(nxt), bt.line, bt.col)
+        b.endTree()
       b.endTree()
     else:
       # first `if` and every `elif` both emit an `elif` node at the COND pos.
@@ -130,10 +136,13 @@ proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       ps.emitInfo(b, ct.line, ct.col, ifTok.line, ifTok.col, false)
       ps.parseExprRange(b, int32(i + 1), int32(colon), ct.line, ct.col)
       let bt = ps.tok(bodyLo)
-      b.addTree "stmts"
-      ps.emitInfo(b, bt.line, bt.col, ct.line, ct.col, false)
-      ps.parseExprRange(b, int32(bodyLo), int32(nxt), bt.line, bt.col)
-      b.endTree()
+      if bare:
+        ps.parseExprRange(b, int32(bodyLo), int32(nxt), ct.line, ct.col)
+      else:
+        b.addTree "stmts"
+        ps.emitInfo(b, bt.line, bt.col, ct.line, ct.col, false)
+        ps.parseExprRange(b, int32(bodyLo), int32(nxt), bt.line, bt.col)
+        b.endTree()
       b.endTree()
     i = nxt
   b.endTree()   # close the `if` node
@@ -232,7 +241,7 @@ proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
         ps.parseCastExpr(b, lo, hi, pl, pc)
         return
     of "if":
-      ps.parseIfExpr(b, lo, hi, pl, pc)
+      ps.parseIfExpr(b, lo, hi, pl, pc, false)
       return
     of "try":
       # `try: A except: B` as a direct expression is stmts-wrapped, like the
@@ -380,6 +389,8 @@ proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       let rt = ps.tok(segLo)
       if rt.kind == tkKeyword and rt.s == "try":
         ps.parseTryExpr(b, int32(segLo), int32(rpIdx), t.line, t.col)
+      elif rt.kind == tkKeyword and rt.s == "if":
+        ps.parseIfExpr(b, int32(segLo), int32(rpIdx), t.line, t.col, true)
       else:
         ps.parseExprRange(b, int32(segLo), int32(rpIdx), t.line, t.col)
       b.endTree()   # expr
