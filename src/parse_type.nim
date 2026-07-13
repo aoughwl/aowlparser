@@ -495,6 +495,37 @@ proc parseObjectCase(ps: var Parser; b: var Builder; caseIdx, defIndent: int;
   b.endTree()   # case
   result = i
 
+proc parseObjectWhen(ps: var Parser; b: var Builder; whenIdx, defIndent: int;
+                     kl, kc: int32): int =
+  ## Conditional fields in an object: `when cond: fields` (+ `elif`/`else`).
+  let kw = ps.tok(whenIdx)
+  b.addTree "when"
+  ps.emitInfo(b, kw.line, kw.col, kl, kc, false)
+  var i = whenIdx
+  let refIndent = kw.col
+  while ps.tok(i).kind == tkKeyword and ps.tok(i).indent >= int32(refIndent) and
+        (ps.tok(i).s == "when" or ps.tok(i).s == "elif" or ps.tok(i).s == "else"):
+    let br = ps.tok(i)
+    let bhi = ps.lineEnd(i)
+    let bcolon = ps.findColon(i, bhi)
+    if br.s == "else":
+      b.addTree "else"
+      ps.emitInfo(b, br.line, br.col, kw.line, kw.col, false)
+      i = ps.emitFieldBody(b, bcolon, refIndent, br.line, br.col)
+      b.endTree()
+    else:
+      let ct = ps.tok(i + 1)
+      b.addTree "elif"
+      ps.emitInfo(b, ct.line, ct.col, kw.line, kw.col, false)
+      if bcolon > i + 1:
+        ps.parseExprRange(b, int32(i + 1), int32(bcolon), ct.line, ct.col)  # cond
+      else:
+        b.addEmpty
+      i = ps.emitFieldBody(b, bcolon, refIndent, ct.line, ct.col)
+      b.endTree()
+  b.endTree()   # when
+  result = i
+
 proc parseObject(ps: var Parser; b: var Builder; objIdx, defIndent: int;
                  pl, pc: int32): int =
   ## `(object <inherit-or-.> (fld ...)...)`. `pl,pc` = type node position.
@@ -521,6 +552,9 @@ proc parseObject(ps: var Parser; b: var Builder; objIdx, defIndent: int;
       inc fi; continue
     if ps.tok(fi).kind == tkKeyword and ps.tok(fi).s == "case":
       fi = ps.parseObjectCase(b, fi, defIndent, kw.line, kw.col)
+      continue
+    if ps.tok(fi).kind == tkKeyword and ps.tok(fi).s == "when":
+      fi = ps.parseObjectWhen(b, fi, defIndent, kw.line, kw.col)
       continue
     let lineHi = ps.lineEnd(fi)
     ps.emitFieldLine(b, fi, lineHi, kw.line, kw.col)
