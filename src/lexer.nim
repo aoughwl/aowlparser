@@ -31,6 +31,25 @@ type
     tpBoth     ## either tabs or spaces; a line that MIXES both in its leading
                ## whitespace is reported (non-fatal) on stderr.
 
+  NewlinePolicy* = enum
+    ## Asserted end-of-line convention (advisory; never alters NIF).
+    nlAny      ## DEFAULT: accept any line ending (CR is normalised as before).
+    nlLf       ## warn on stderr for each line ending that is not bare LF.
+    nlCrlf     ## warn on stderr for each line ending that is not CRLF.
+
+  BomPolicy* = enum
+    ## Handling of a leading UTF-8 BOM (`EF BB BF`).
+    bomDefault ## DEFAULT: legacy behaviour (a BOM is skipped as 3 unknown
+               ## bytes, which shifts line-1 column — a latent bug, left as-is).
+    bomStrip   ## consume a leading BOM WITHOUT advancing the column, so line-1
+               ## indent/col are unaffected.
+    bomReject  ## warn on stderr (and count an error) when a BOM is present.
+
+  TabStops* = enum
+    ## How a `\t` advances the column when tabs are permitted.
+    tsHard     ## DEFAULT (legacy): additive, `col += tabWidth`.
+    tsRound    ## real tab stop: advance to the next multiple of `tabWidth`.
+
   LexOptions* = object
     ## Whitespace / indentation policy threaded into `tokenize`. The zero value
     ## (`defaultLexOptions`) reproduces the historical, nifler-compatible
@@ -43,9 +62,23 @@ type
                             ## the default). When >0, first-on-line tokens whose
                             ## indent column is not a multiple of N are reported
                             ## on stderr; parsing is NEVER affected.
+    finalNewlineRequire*: bool ## when true, warn on stderr if the source does
+                            ## not end with a terminating newline (default off).
+    newlinePolicy*: NewlinePolicy ## assert an EOL convention (default nlAny).
+    trailingWhitespaceWarn*: bool ## when true, warn for any physical line with
+                            ## spaces/tabs before its newline (default off).
+    bomPolicy*: BomPolicy   ## leading-BOM handling (default bomDefault).
+    indentConsistency*: bool ## advisory: warn when first-on-line tokens disagree
+                            ## on the file's indentation step (default off).
+    tabStops*: TabStops     ## tab-advance mode when tabs permitted (default tsHard).
+    docComments*: bool      ## true (default) = emit standalone doc comments as a
+                            ## `(comment)` node; false = drop them entirely.
 
 const
-  defaultLexOptions* = LexOptions(tabPolicy: tpSpaces, tabWidth: 8, indentWidth: 0)
+  defaultLexOptions* = LexOptions(tabPolicy: tpSpaces, tabWidth: 8, indentWidth: 0,
+    finalNewlineRequire: false, newlinePolicy: nlAny, trailingWhitespaceWarn: false,
+    bomPolicy: bomDefault, indentConsistency: false, tabStops: tsHard,
+    docComments: true)
 
 type
   Lexer = object
@@ -59,10 +92,13 @@ type
     sawSpaceInIndent: bool   ## tpBoth mixing detection: state for current line
     sawTabInIndent: bool
     warnedMixThisLine: bool
+    errors: int              ## unknown/illegal bytes seen (drives --strict)
+    prevIndent: int32        ## indent column of the previous first-on-line token
+    indentUnit: int32        ## derived indentation step (--indent-consistency)
 
 proc initLexer(src: string; opts: LexOptions): Lexer =
   Lexer(src: src, n: src.len, pos: 0, line: 1, col: 0, atLineStart: true,
-        opts: opts)
+        opts: opts, errors: 0, prevIndent: 0, indentUnit: 0)
 
 proc cur(lx: Lexer): char =
   if lx.pos < lx.n: lx.src[lx.pos] else: '\0'
@@ -85,7 +121,14 @@ proc advance(lx: var Lexer) =
       # A tab counts as `tabWidth` columns once tabs are permitted, so a
       # tab-indented line reports the same `indent` as its space-expanded
       # equivalent. Under tpSpaces we fall through to width-1 (legacy) below.
-      inc lx.col, int32(lx.opts.tabWidth)
+      # tsRound advances to the next multiple of tabWidth (real tab stop);
+      # tsHard (default) is additive. They agree at column 0 (indentation),
+      # differing only for a tab that follows mid-line content.
+      if lx.opts.tabStops == tsRound:
+        let w = int32(lx.opts.tabWidth)
+        lx.col = ((lx.col div w) + 1'i32) * w
+      else:
+        inc lx.col, int32(lx.opts.tabWidth)
     else:
       inc lx.col
     inc lx.pos
@@ -111,7 +154,7 @@ proc hexVal(c: char): int =
 const OperatorChars = {'+', '-', '*', '/', '\\', '<', '>', '=', '@', '$', '~',
                        '&', '%', '|', '!', '?', '^', '.', ':'}
 
-proc startToken(lx: Lexer; kind: TokKind): Token =
+proc startToken(lx: var Lexer; kind: TokKind): Token =
   result = initToken(kind, lx.line, lx.col)
   if lx.atLineStart:
     result.indent = lx.col
@@ -122,6 +165,20 @@ proc startToken(lx: Lexer; kind: TokKind): Token =
       write stderr, "nifparser: indentation of " & $lx.col &
         " column(s) at line " & $lx.line & " is not a multiple of --indent-width:" &
         $lx.opts.indentWidth & "\n"
+    # Advisory: --indent-consistency. The indentation *step* is auto-derived from
+    # the first line that indents deeper than its predecessor; thereafter any
+    # first-on-line token whose column is not a whole multiple of that derived
+    # unit is flagged (a pragmatic, purely lexer-level approximation of "sibling
+    # lines disagree on their indent step"). Never alters the recorded indent.
+    if lx.opts.indentConsistency:
+      if lx.indentUnit == 0 and lx.col > lx.prevIndent:
+        lx.indentUnit = lx.col - lx.prevIndent
+      if lx.indentUnit > 0 and lx.col > 0 and (lx.col mod lx.indentUnit) != 0:
+        write stderr, "nifparser: indentation of " & $lx.col &
+          " column(s) at line " & $lx.line &
+          " is not a multiple of the file's indent step (" & $lx.indentUnit &
+          ") [--indent-consistency]\n"
+      lx.prevIndent = lx.col
 
 # ---------------------------------------------------------------------------
 # escape decoding (mirrors classic getEscapedChar) — appends RAW decoded bytes
@@ -527,12 +584,23 @@ proc skipDocBlockComment(lx: var Lexer) =
 
 proc tokenize*(src: string): seq[Token]
 
-proc tokenize*(src: string; opts: LexOptions): seq[Token] =
+proc tokenize*(src: string; opts: LexOptions; errors: var int): seq[Token] =
   ## Produce the full token list terminated by a `tkEof`. Whitespace and
   ## comments are consumed; the off-side `indent` field marks first-on-line
-  ## tokens. `opts` controls tab/indent policy — see `LexOptions`.
+  ## tokens. `opts` controls tab/indent policy — see `LexOptions`. `errors` is
+  ## incremented for every unknown/illegal byte encountered (drives `--strict`).
   var lx = initLexer(src, opts)
   result = @[]
+  # --- leading UTF-8 BOM (EF BB BF) -------------------------------------------
+  if lx.opts.bomPolicy != bomDefault and lx.n >= 3 and
+     src[0] == '\xEF' and src[1] == '\xBB' and src[2] == '\xBF':
+    if lx.opts.bomPolicy == bomReject:
+      write stderr, "nifparser: leading UTF-8 BOM rejected [--bom:reject]\n"
+      inc lx.errors
+    # Both strip and reject consume the 3 BOM bytes WITHOUT advancing the column,
+    # so line-1 indentation/columns are unaffected (fixes the latent col-shift of
+    # the legacy unknown-byte skip). The default (bomDefault) path is untouched.
+    lx.pos = 3
   while lx.pos < lx.n:
     let before = result.len
     let c = lx.cur
@@ -548,6 +616,22 @@ proc tokenize*(src: string; opts: LexOptions): seq[Token] =
           lx.warnedMixThisLine = true
       advance lx
     elif c == '\n':
+      # Advisory line-ending checks (never alter the NIF). `lx.line` is still the
+      # number of the line ending here (the '\n' is not yet consumed).
+      if lx.opts.newlinePolicy != nlAny or lx.opts.trailingWhitespaceWarn:
+        let isCrlf = lx.pos > 0 and lx.src[lx.pos - 1] == '\r'
+        if lx.opts.newlinePolicy == nlLf and isCrlf:
+          write stderr, "nifparser: line " & $lx.line &
+            " ends with CRLF, expected LF [--newline:lf]\n"
+        elif lx.opts.newlinePolicy == nlCrlf and not isCrlf:
+          write stderr, "nifparser: line " & $lx.line &
+            " ends with LF, expected CRLF [--newline:crlf]\n"
+        if lx.opts.trailingWhitespaceWarn:
+          var j = lx.pos - 1
+          if j >= 0 and lx.src[j] == '\r': dec j
+          if j >= 0 and (lx.src[j] == ' ' or lx.src[j] == '\t'):
+            write stderr, "nifparser: trailing whitespace on line " & $lx.line &
+              " [--trailing-whitespace:warn]\n"
       advance lx
     elif c == '#':
       if lx.peek(1) == '[':
@@ -561,7 +645,7 @@ proc tokenize*(src: string; opts: LexOptions): seq[Token] =
         let t = startToken(lx, tkComment)
         skipDocBlockComment(lx)
         lx.atLineStart = false
-        if standalone: result.add t
+        if standalone and lx.opts.docComments: result.add t
       elif lx.peek(1) == '#':
         # `##` doc comment. Nifler makes a standalone one (at statement position,
         # i.e. first token on its line) an `nkCommentStmt` → `(comment)`; a
@@ -585,7 +669,7 @@ proc tokenize*(src: string; opts: LexOptions): seq[Token] =
           else:
             break
         lx.atLineStart = false
-        if standalone: result.add t
+        if standalone and lx.opts.docComments: result.add t
       else:
         while lx.pos < lx.n and lx.cur != '\n':
           advance lx
@@ -646,17 +730,29 @@ proc tokenize*(src: string; opts: LexOptions): seq[Token] =
       lx.atLineStart = false
       result.add t
     else:
-      # Unknown byte: skip it.
+      # Unknown/illegal byte: skip it (counted for --strict).
+      inc lx.errors
       advance lx
     # Record the end column of whatever token this iteration produced (lx now
     # sits at the char just past it). Powers whitespace/adjacency checks.
     if result.len > before:
       result[result.len - 1].endCol = lx.col
+  # --- final-newline check (advisory) -----------------------------------------
+  if lx.opts.finalNewlineRequire and lx.n > 0 and src[lx.n - 1] != '\n':
+    write stderr, "nifparser: source does not end with a newline " &
+      "[--final-newline:require]\n"
   var eof = initToken(tkEof, lx.line, lx.col)
   eof.indent = 0
   result.add eof
+  errors = lx.errors
+
+proc tokenize*(src: string; opts: LexOptions): seq[Token] =
+  ## Overload without an error out-param (diagnostics still emitted).
+  var errs = 0
+  tokenize(src, opts, errs)
 
 proc tokenize*(src: string): seq[Token] =
   ## Back-compat overload: legacy, nifler-compatible defaults (spaces-only
   ## indentation, tab width 8 but unused, indent-width validation off).
-  tokenize(src, defaultLexOptions)
+  var errs = 0
+  tokenize(src, defaultLexOptions, errs)
