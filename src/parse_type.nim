@@ -874,14 +874,31 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
   else:
     b.addEmpty  # params slot
     b.addEmpty  # return type slot
-  # pragmas
-  if ps.tok(i).kind == tkCurlyLe:
+  # pragmas: `{.` … `.}`. In curly mode a bare `{` (no leading dot) is a block
+  # BODY, not pragmas — leave it for the body handler below.
+  if ps.tok(i).kind == tkCurlyLe and
+     (not ps.curly or ps.tok(i + 1).kind == tkDot):
     i = ps.parsePragmas(b, i, kw.line, kw.col)
   else:
     b.addEmpty
   b.addEmpty  # reserved / misc
-  # body after `=`
-  if ps.tok(i).kind == tkOperator and ps.tok(i).s == "=":
+  # body: `= …` (`:`/indent style) or, in curly mode, `{ … }`. A curly body is a
+  # bare `{` (not a `{.` pragma) with NO preceding `=`, so `proc f(): set = {}`
+  # keeps its set-literal expression body.
+  if ps.curly and ps.tok(i).kind == tkCurlyLe and ps.tok(i + 1).kind != tkDot:
+    # curly-block body: `proc f() { stmt; stmt }`. Delimited by the matching `}`;
+    # statements inside are `;`- or newline-separated (parseStmt chains `;`).
+    let rb = ps.matchClose(i)
+    let first = ps.tok(i + 1)
+    b.addTree "stmts"
+    ps.emitInfo(b, first.line, first.col, kw.line, kw.col, false)
+    var j = i + 1
+    while j < rb and ps.tok(j).kind != tkEof:
+      if ps.tok(j).kind == tkComment: inc j; continue
+      j = ps.parseStmt(b, j, first.line, first.col, rb)
+    b.endTree()
+    i = rb + 1
+  elif ps.tok(i).kind == tkOperator and ps.tok(i).s == "=":
     inc i
     let refIndent = kw.col
     let first = ps.tok(i)
