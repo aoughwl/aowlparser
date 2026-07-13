@@ -171,7 +171,7 @@ proc parseCmdKw(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   ps.parseArgList(b, lo + 1, hi, kw.line, kw.col)
   b.endTree()
 
-proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   let t = ps.tok(int(lo))
   # --- `-<number>` folds into a signed literal (nifler): only `-`, only when
   # directly adjacent (no space), only a bare numeric literal, nothing after. ---
@@ -451,7 +451,14 @@ proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   else:
     b.addEmpty
 
-proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+  ## Depth-guarding wrapper (see `enterDepth`): counts recursion nesting for
+  ## `--max-depth`, then delegates. Off-by-default: inert when maxDepth == 0.
+  ps.enterDepth(ps.tok(int(lo)).line)
+  ps.parsePrimaryRangeImpl(b, lo, hi, pl, pc)
+  dec ps.depth
+
+proc parseExprRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   # Keyword-led expression forms must NOT be split by the operator scanner
   # (their conditions/bodies contain operators that are not top-level).
   let head = ps.tok(int(lo))
@@ -483,3 +490,10 @@ proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
     ps.parseExprRange(b, lo, int32(split), op.line, op.col)          # left
     ps.parseExprRange(b, int32(split) + 1, hi, op.line, op.col)      # right
     b.endTree()
+
+proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+  ## Depth-guarding wrapper (see `enterDepth`): counts recursion nesting for
+  ## `--max-depth`, then delegates. Off-by-default: inert when maxDepth == 0.
+  ps.enterDepth(ps.tok(int(lo)).line)
+  ps.parseExprRangeImpl(b, lo, hi, pl, pc)
+  dec ps.depth

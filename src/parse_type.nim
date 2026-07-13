@@ -56,7 +56,7 @@ proc typeExprEnd(ps: var Parser; lo: int): int =
 
 # --- type expressions --------------------------------------------------------
 
-proc parseTypeRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+proc parseTypeRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   ## Emit ONE type expression covering tokens `[lo, hi)`.
   if lo >= hi:
     b.addEmpty
@@ -179,6 +179,13 @@ proc parseTypeRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   let t = ps.tok(int(lo))
   b.addIdent t.s
   ps.emitInfo(b, t.line, t.col, pl, pc, false)
+
+proc parseTypeRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+  ## Depth-guarding wrapper (see `enterDepth`): counts recursion nesting for
+  ## `--max-depth`, then delegates. Off-by-default: inert when maxDepth == 0.
+  ps.enterDepth(ps.tok(int(lo)).line)
+  ps.parseTypeRangeImpl(b, lo, hi, pl, pc)
+  dec ps.depth
 
 proc parseType(ps: var Parser; b: var Builder; idx: int; pl, pc: int32): int =
   ## Inline type expression starting at token `idx`. Returns the index after it.

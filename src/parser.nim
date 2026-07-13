@@ -20,6 +20,7 @@
 
 import tokens
 import nifbuilder
+import std/syncio
 
 include parsecore
 include parse_expr

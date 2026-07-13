@@ -796,7 +796,7 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
   let consumed = ps.parseExprStmt(b, int32(startIdx), int32(hi), pl, pc)
   result = if consumed > hi: consumed else: hi
 
-proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
+proc parseStmtImpl(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
                hiLimit: int): int =
   ## Parse a run of `;`-separated statements on the same logical line (each an
   ## `(stmts …)` sibling), bounded by `hiLimit` (a branch/brace body) or the
@@ -807,3 +807,11 @@ proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
   while ps.tok(i).kind == tkSemicolon and i + 1 < bound:
     i = ps.parseOneStmt(b, i + 1, pl, pc, hiLimit)
   result = i
+
+proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
+               hiLimit: int): int =
+  ## Depth-guarding wrapper (see `enterDepth`): counts recursion nesting for
+  ## `--max-depth`, then delegates. Off-by-default: inert when maxDepth == 0.
+  ps.enterDepth(ps.tok(startIdx).line)
+  result = ps.parseStmtImpl(b, startIdx, pl, pc, hiLimit)
+  dec ps.depth

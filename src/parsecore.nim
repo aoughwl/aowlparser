@@ -18,9 +18,22 @@ type
     toks: seq[Token]
     file: string
     curly*: bool   ## experimental: accept `{ … }` as a block body alongside `:`
+    depth*: int    ## live recursion nesting through the main parse entry points
+    maxDepth*: int ## abort ceiling for `depth` (0 = unlimited, the default)
 
-proc initParser*(toks: seq[Token]; file: string; curly = false): Parser =
-  Parser(toks: toks, file: file, curly: curly)
+proc initParser*(toks: seq[Token]; file: string; curly = false;
+                 maxDepth = 0): Parser =
+  Parser(toks: toks, file: file, curly: curly, depth: 0, maxDepth: maxDepth)
+
+proc enterDepth(ps: var Parser; line: int32) =
+  ## Bump the recursion counter and abort (non-zero exit) if `--max-depth` is
+  ## in force and the nesting exceeds it. Callers pair this with `dec ps.depth`
+  ## once the recursive entry returns. Cheap and inert when maxDepth == 0.
+  inc ps.depth
+  if ps.maxDepth > 0 and ps.depth > ps.maxDepth:
+    write stderr, "nifparser: parse nesting exceeded --max-depth:" &
+      $ps.maxDepth & " (near line " & $line & ")\n"
+    quit 1
 
 # ---------------------------------------------------------------------------
 # token helpers
@@ -292,6 +305,7 @@ proc splitArgs(ps: Parser; lo, hi: int): seq[int] =
 # ---------------------------------------------------------------------------
 # parse_expr.nim implements:
 proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
+proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
 # parse_stmt.nim implements:
 proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
                hiLimit: int): int
