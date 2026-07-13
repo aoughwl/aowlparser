@@ -238,8 +238,16 @@ proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       return
     of "cast":
       if int(lo) + 1 < int(hi) and ps.tok(int(lo)+1).kind == tkBracketLe:
-        ps.parseCastExpr(b, lo, hi, pl, pc)
-        return
+        # `cast[T](x)` — but a trailing postfix (`cast[T](x)[]`, `.field`) must
+        # wrap the cast, so fall through to the postfix chain in that case.
+        let rb = ps.matchClose(int(lo) + 1)             # ] of cast[T]
+        var castEnd = rb
+        if rb + 1 < int(hi) and ps.tok(rb + 1).kind == tkParLe:
+          castEnd = ps.matchClose(rb + 1)               # ) of (x)
+        if castEnd + 1 >= int(hi):
+          ps.parseCastExpr(b, lo, hi, pl, pc)
+          return
+        # else: trailing postfix present → handled by findPostfix below
     of "if":
       ps.parseIfExpr(b, lo, hi, pl, pc, false, "if")
       return
