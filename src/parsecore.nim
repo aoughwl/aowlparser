@@ -225,6 +225,19 @@ proc matchClose(ps: Parser; openIdx: int): int =
     inc i
   result = i
 
+proc matchOpen(ps: Parser; closeIdx: int): int =
+  ## Index of the bracket that opens the one at `closeIdx` (scans backward).
+  var depth = 0
+  var i = closeIdx
+  while i >= 0:
+    let k = ps.tok(i).kind
+    if isCloseBracket(k): inc depth
+    elif isOpenBracket(k):
+      dec depth
+      if depth == 0: return i
+    dec i
+  result = closeIdx
+
 proc findSplit(ps: Parser; lo, hi: int): int =
   ## Rightmost lowest-precedence binary operator at depth 0 in `[lo, hi)`, or -1.
   var depth = 0

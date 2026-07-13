@@ -625,6 +625,41 @@ proc semiEnd(ps: Parser; startIdx, bound: int): int =
     inc i
   result = bound
 
+proc parsePostExprBlock(ps: var Parser; b: var Builder; headLo, colonIdx: int;
+                        pl, pc: int32): int =
+  ## Nim postExprBlocks: `call(args): body` / `cmd a, b: body` — the trailing
+  ## `:` block becomes a `(stmts …)` argument appended to the call/command.
+  let head = ps.tok(headLo)
+  let refIndent = head.col
+  let ce = ps.cmdCalleeEnd(headLo, colonIdx)
+  if head.kind == tkIdent and ce < colonIdx and ps.startsArg(ce, colonIdx):
+    # command with space-separated args: `foo a, b: body` → `(cmd callee args… (stmts))`
+    b.addTree "cmd"
+    ps.emitInfo(b, head.line, head.col, pl, pc, false)
+    ps.parseExprRange(b, int32(headLo), int32(ce), head.line, head.col)   # callee
+    let starts = ps.splitArgs(ce, colonIdx)
+    for ai in 0 ..< starts.len:
+      let aLo = starts[ai]
+      let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: colonIdx
+      if aLo < aHi:
+        ps.parseArg(b, int32(aLo), int32(aHi), head.line, head.col)
+    result = ps.emitBody(b, colonIdx, refIndent, head.line, head.col)     # (stmts body) arg
+    b.endTree()
+  else:
+    # call form: `foo: body` / `c.into: body` / `foo(args): body`
+    # → `(call <callee> [args…] (stmts body))`.
+    b.addTree "call"
+    ps.emitInfo(b, head.line, head.col, pl, pc, false)
+    if colonIdx - 1 >= headLo and ps.tok(colonIdx - 1).kind == tkParRi:
+      let rparen = colonIdx - 1
+      let lparen = ps.matchOpen(rparen)
+      ps.parseExprRange(b, int32(headLo), int32(lparen), head.line, head.col)     # callee
+      ps.parseArgList(b, int32(lparen + 1), int32(rparen), head.line, head.col)   # args
+    else:
+      ps.parseExprRange(b, int32(headLo), int32(colonIdx), head.line, head.col)   # bare callee
+    result = ps.emitBody(b, colonIdx, refIndent, head.line, head.col)     # (stmts body) arg
+    b.endTree()
+
 proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
                   hiLimit: int): int =
   ## Emit one statement starting at token `startIdx`. Returns the index of the
@@ -673,6 +708,34 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
     of "const": return ps.parseSection(b, startIdx, pl, pc, "const")
     of "type": return ps.parseTypeSection(b, startIdx, pl, pc)
     else: discard
+  # postExprBlock: an expression statement whose line has a depth-0 `:` (not a
+  # keyword statement) is `call/cmd(args): body` — parse the block as a trailing
+  # `(stmts …)` arg. (Bounded to the head line; the block is on later lines.)
+  if hiLimit < 0:
+    let lineHi = ps.lineEnd(startIdx)
+    let pcolon = ps.depth0Colon(startIdx, lineHi)
+    # Only a `:` that is the LAST token on the head line (an indented block
+    # follows) — the unambiguous do-block form. Guard against assignment RHS.
+    if pcolon == lineHi - 1 and pcolon > startIdx and
+       ps.tok(lineHi).indent > ps.tok(startIdx).col and
+       ps.findAssign(startIdx, pcolon) < 0:
+      # exclude a colon owned by an unparenthesized if/when/case EXPRESSION in
+      # the head (`x = if c: a`, `echo if c: a else: b`) — that is not a block.
+      var cf = false
+      var d = 0
+      var k = startIdx
+      while k < pcolon:
+        let t = ps.tok(k)
+        if isOpenBracket(t.kind): inc d
+        elif isCloseBracket(t.kind):
+          if d > 0: dec d
+        elif d == 0 and t.kind == tkKeyword and
+             (t.s == "if" or t.s == "when" or t.s == "case" or
+              t.s == "elif" or t.s == "else" or t.s == "of"):
+          cf = true; break
+        inc k
+      if not cf:
+        return ps.parsePostExprBlock(b, startIdx, pcolon, pl, pc)
   # expression / command / assignment statement (bounded by the logical line,
   # any tighter `hiLimit`, and the next `;`)
   var bound = ps.lineEnd(startIdx)
