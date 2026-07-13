@@ -172,8 +172,12 @@ proc emitBody(ps: var Parser; b: var Builder; colonIdx: int; refIndent: int32;
     while i < hi and ps.tok(i).kind != tkEof:
       i = ps.parseStmt(b, i, first.line, first.col, hi)
   else:
-    # indented block
-    while ps.tok(i).kind != tkEof and ps.tok(i).indent > refIndent:
+    # indented block: statements at the body's own indentation (`first.indent`)
+    # or deeper. Thresholding on the body indent — not the caller's `refIndent`
+    # (the keyword column) — makes value-context bodies work too, e.g. the body
+    # of `let x = try:` sits mid-line so its keyword column is not its indent.
+    let bodyRef = first.indent - 1
+    while ps.tok(i).kind != tkEof and ps.tok(i).indent > bodyRef:
       i = ps.parseStmt(b, i, first.line, first.col, -1)
   b.endTree()
   result = i
@@ -376,13 +380,19 @@ proc parseTryExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
 proc parseTry(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int =
   let kw = ps.tok(kwIdx)
   let refIndent = kw.col
+  # `except`/`finally` align with the try's LINE (its enclosing statement), which
+  # differs from the keyword column for a value-context try (`let x = try:`).
+  let lineIndent = ps.lineIndentOf(kwIdx)
   b.addTree "try"
   ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
   let hi = ps.lineEnd(kwIdx)
   let colon = ps.findColon(kwIdx, hi)
+  let bodyIndent = if colon >= 0 and ps.tok(colon + 1).indent >= 0:
+                     ps.tok(colon + 1).indent else: int32(100000)
   var i = ps.emitBody(b, colon, refIndent, kw.line, kw.col)   # try body, parent = try node
   while ps.tok(i).kind == tkKeyword and
-        (ps.tok(i).indent == refIndent or ps.tok(i).indent < 0) and
+        (ps.tok(i).indent < 0 or
+         (ps.tok(i).indent >= lineIndent and ps.tok(i).indent < bodyIndent)) and
         (ps.tok(i).s == "except" or ps.tok(i).s == "finally"):
     let br = ps.tok(i)
     let bhi = ps.lineEnd(i)

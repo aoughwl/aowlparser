@@ -225,6 +225,14 @@ proc matchClose(ps: Parser; openIdx: int): int =
     inc i
   result = i
 
+proc lineIndentOf(ps: Parser; idx: int): int32 =
+  ## Indentation of the physical line that token `idx` is on (scans back to the
+  ## first-on-line token). For a mid-line keyword (`let x = try:`) this is the
+  ## enclosing statement's indent, not the keyword's column.
+  var i = idx
+  while i > 0 and ps.tok(i).indent < 0: dec i
+  result = if ps.tok(i).indent >= 0: ps.tok(i).indent else: ps.tok(idx).col
+
 proc matchOpen(ps: Parser; closeIdx: int): int =
   ## Index of the bracket that opens the one at `closeIdx` (scans backward).
   var depth = 0
