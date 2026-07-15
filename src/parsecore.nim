@@ -73,13 +73,17 @@ proc opIsInfix(ps: Parser; i, lo: int): bool =
   result = true
 
 proc startsArg(ps: Parser; i, hi: int): bool =
-  ## Whether token `i` can begin a command argument: an expression atom, or a
-  ## prefix operator directly attached to its operand (`$v`, `@x`, `-1`).
+  ## Whether token `i` (the token right after a callee primary) begins a command
+  ## argument: an expression atom, or a PREFIX operator (`echo -1`, `f $v`).
+  ## A prefix arg has a space BEFORE the operator but not after; with no leading
+  ## space the operator is infix (`c.len-1`), so it is not a command.
   let t = ps.tok(i)
   if t.kind == tkOperator:
     if i + 1 >= hi: return false
+    let prev = ps.tok(i - 1)
+    let leadSpace = t.line != prev.line or t.col > prev.endCol
     let nxt = ps.tok(i + 1)
-    return nxt.line == t.line and nxt.col == t.endCol   # adjacent operand
+    return leadSpace and nxt.line == t.line and nxt.col == t.endCol
   result = startsExpr(t) and not isBinaryOp(t)
 
 proc cmdCalleeEnd(ps: Parser; lo, hi: int): int =

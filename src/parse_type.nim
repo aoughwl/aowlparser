@@ -113,6 +113,26 @@ proc parseTypeRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
     parseTypeRange(ps, b, int32(sp) + 1, hi, op.line, op.col)
     b.endTree()
     return
+  # command in type position: `lent string`, `sink T`, `owned Foo` → `(cmd lent
+  # string)`. Must precede the postfix `[]`/`.` checks so `sink seq[string]`
+  # binds as `sink (seq[string])`, not `(sink seq)[string]` — a leading modifier
+  # keyword has a SPACE before its argument, so cmdCalleeEnd stops at it, whereas
+  # `seq[string]` (adjacent `[`) keeps the bracket in the callee (ce == hi).
+  block:
+    let ce = ps.cmdCalleeEnd(int(lo), int(hi))
+    if ps.tok(int(lo)).kind == tkIdent and ce < int(hi) and ps.startsArg(ce, int(hi)):
+      let callee = ps.tok(int(lo))
+      b.addTree "cmd"
+      ps.emitInfo(b, callee.line, callee.col, pl, pc, false)
+      parseTypeRange(ps, b, lo, int32(ce), callee.line, callee.col)
+      let starts = ps.splitArgs(ce, int(hi))
+      for ai in 0 ..< starts.len:
+        let aLo = starts[ai]
+        let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: int(hi)
+        if aLo < aHi:
+          parseTypeRange(ps, b, int32(aLo), int32(aHi), callee.line, callee.col)
+      b.endTree()
+      return
   # postfix bracket → `(at base args...)`
   if ps.tok(int(hi) - 1).kind == tkBracketRi:
     # find the matching '[' at depth 0
@@ -159,26 +179,15 @@ proc parseTypeRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       parseTypeRange(ps, b, int32(d) + 1, hi, dt.line, dt.col)
       b.endTree()
       return
-  # command in type position: `lent string`, `sink T`, `owned Foo` → `(cmd lent string)`
-  block:
-    let ce = ps.cmdCalleeEnd(int(lo), int(hi))
-    if ps.tok(int(lo)).kind == tkIdent and ce < int(hi) and ps.startsArg(ce, int(hi)):
-      let callee = ps.tok(int(lo))
-      b.addTree "cmd"
-      ps.emitInfo(b, callee.line, callee.col, pl, pc, false)
-      parseTypeRange(ps, b, lo, int32(ce), callee.line, callee.col)
-      let starts = ps.splitArgs(ce, int(hi))
-      for ai in 0 ..< starts.len:
-        let aLo = starts[ai]
-        let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: int(hi)
-        if aLo < aHi:
-          parseTypeRange(ps, b, int32(aLo), int32(aHi), callee.line, callee.col)
-      b.endTree()
-      return
-  # atom (single ident/keyword type name)
+  # atom: a type name (ident/keyword), or a literal in type-arg position
+  # (`array[4, byte]`, `array['a'..'z', T]`) which the expression emitter renders
+  # correctly (an int literal must not be `addIdent`-escaped to `\34`).
   let t = ps.tok(int(lo))
-  b.addIdent t.s
-  ps.emitInfo(b, t.line, t.col, pl, pc, false)
+  if t.kind == tkIdent or t.kind == tkKeyword:
+    b.addIdent t.s
+    ps.emitInfo(b, t.line, t.col, pl, pc, false)
+  else:
+    ps.parseExprRange(b, lo, hi, pl, pc)
 
 proc parseTypeRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   ## Depth-guarding wrapper (see `enterDepth`): counts recursion nesting for
@@ -386,6 +395,12 @@ proc emitFieldLine(ps: var Parser; b: var Builder; fi, lineHi: int;
   ## Emit `(fld …)` nodes for one `name(, name)* [: type] [= val]` line, with
   ## the type/value duplicated across a shared-type name group. `kl,kc` = the
   ## parent (object/of) node position.
+  # a bare `nil` marks a variant branch with no fields → `(nil)` (nifler keeps it).
+  if ps.tok(fi).kind == tkKeyword and ps.tok(fi).s == "nil":
+    b.addTree "nil"
+    ps.emitInfo(b, ps.tok(fi).line, ps.tok(fi).col, kl, kc, false)
+    b.endTree()
+    return
   var j = fi
   var names: seq[Token] = @[]
   var exports: seq[bool] = @[]

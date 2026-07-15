@@ -559,16 +559,10 @@ proc parseSectionDef(ps: var Parser; b: var Builder; lo, hi: int; tag: string;
     else:
       b.addEmpty   # pragma
     if typeLo >= 0 and typeLo < typeHi:
-      # A `proc`/`iterator`/`tuple` type annotation must go through the TYPE
-      # parser (→ `proctype`/`tuple`), not the expression parser (which would
-      # read `proc (…)` as an anonymous-proc value). Other type forms match
-      # either way, so keep the expression path for them (fewer surprises).
-      let tt = ps.tok(typeLo)
-      if tt.kind == tkKeyword and
-         (tt.s == "proc" or tt.s == "iterator" or tt.s == "tuple"):
-        parseTypeRange(ps, b, int32(typeLo), int32(typeHi), nTok.line, nTok.col)
-      else:
-        ps.parseExprRange(b, int32(typeLo), int32(typeHi), nTok.line, nTok.col)
+      # The type slot always goes through the TYPE parser (as nifler does): the
+      # expression parser mishandles modifier keywords in generic args
+      # (`seq[ref Foo]`, `sink seq[string]`) and `proc (…)` type signatures.
+      parseTypeRange(ps, b, int32(typeLo), int32(typeHi), nTok.line, nTok.col)
     else:
       b.addEmpty
     if valLo >= 0 and valLo < hi:
