@@ -5,9 +5,12 @@ parse-dialect NIF (`.p.nif`) the compiler frontend consumes — the same job as 
 classic compiler's `nifler`, but self-hosted and free of the classic Nim compiler,
 so it can be compiled to JavaScript and run in the browser.
 
-Its output is **byte-for-byte identical** to native `nifler`: the entire nimony
-standard library round-trips structurally, and 46 of 47 corpus programs match to
-the byte.
+Its output is **byte-for-byte identical** to native `nifler` — save for one line
+it owns on purpose, the `(.vendor "nifparser")` header (nifparser stamps its own
+identity rather than impersonating `nifler`). The entire nimony standard library
+round-trips structurally, and 46 of 47 corpus programs match to the byte apart
+from that header; the differential harness neutralizes it and holds the rest
+strict.
 
 **📖 Full docs → [aoughwl.github.io/docs/nifparser](https://aoughwl.github.io/docs/nifparser)**
 
