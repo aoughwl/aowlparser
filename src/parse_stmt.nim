@@ -654,7 +654,14 @@ proc parseSectionDef(ps: var Parser; b: var Builder; lo, hi: int; tag: string;
     let hasExport = nameStarts[ni] + 1 < nameEnd and
                     ps.tok(nameStarts[ni] + 1).kind == tkOperator and
                     ps.tok(nameStarts[ni] + 1).s == "*"
-    let anchor = if hasExport: ps.tok(nameStarts[ni] + 1) else: nTok
+    # Anchor precedence mirrors the classic name-node wrapping: a pragma wraps the
+    # decl in nkPragmaExpr whose info is the `{.` (identWithPragma's newNodeP),
+    # outranking the export `*`; an export alone is nkPostfix at the `*`; a plain
+    # name anchors at itself.
+    let anchor =
+      if pragLo >= 0: ps.tok(pragLo)
+      elif hasExport: ps.tok(nameStarts[ni] + 1)
+      else: nTok
     b.addTree tag
     ps.emitInfo(b, anchor.line, anchor.col, pl, pc, false)   # section node = name-node pos
     ps.emitName(b, nTok, anchor.line, anchor.col)   # name atom, or `(quoted …)`
