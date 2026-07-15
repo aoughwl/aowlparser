@@ -677,9 +677,18 @@ proc parseSection(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
   if next.indent >= 0:
     # indented section block: each line at indent > kw.col is one ident-def
     let refIndent = kw.col
+    let memberIndent = next.indent          # column of the section's ident-defs
     var i = kwIdx + 1
     while ps.tok(i).kind != tkEof and ps.tok(i).indent > refIndent:
-      if ps.tok(i).kind == tkComment:     # doc comment in var/let/const section: dropped
+      if ps.tok(i).kind == tkComment:
+        # A comment AT the member indent is a standalone member → a sibling
+        # `(comment)` (nifler emits section members as flat siblings); a DEEPER
+        # comment is the trailing doc of the preceding def and is dropped.
+        if ps.tok(i).indent == memberIndent:
+          let ct = ps.tok(i)
+          b.addTree "comment"
+          ps.emitInfo(b, ct.line, ct.col, pl, pc, false)
+          b.endTree()
         inc i; continue
       let dhi = ps.lineEnd(i)
       let consumed = ps.parseSectionDef(b, i, dhi, tag, pl, pc)
