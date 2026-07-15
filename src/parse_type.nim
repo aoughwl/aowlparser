@@ -457,11 +457,13 @@ proc emitFieldLine(ps: var Parser; b: var Builder; fi, lineHi: int;
     vLo = j + 1
   for ni in 0 ..< names.len:
     let nm = names[ni]
-    # An exported field `name*` is nkPostfix; nifler anchors the fld node at the
-    # name-node's info — the `*` position for a postfix, which sits directly after
-    # the name (no space), i.e. at nm.endCol. The name then gets a negative delta
-    # back. (Same rule as exported const/let/var members; see parseSectionDef.)
-    let aCol = if exports[ni]: nm.endCol else: nm.col
+    # Field name-node anchor, mirroring the classic wrapping (see parseSectionDef):
+    # a pragma wraps it in nkPragmaExpr at the `{.`; an export alone is nkPostfix
+    # at the `*` (directly after the name, nm.endCol); a plain name at itself.
+    let aCol =
+      if firstPragLo >= 0: ps.tok(firstPragLo).col
+      elif exports[ni]: nm.endCol
+      else: nm.col
     b.addTree "fld"
     ps.emitInfo(b, nm.line, aCol, kl, kc, false)
     ps.emitName(b, nm, nm.line, aCol)   # field name atom, or `(quoted …)`
