@@ -501,6 +501,10 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
         if isOpenBracket(kk.kind): inc d
         elif isCloseBracket(kk.kind):
           if d > 0: dec d
+        elif d == 0 and kk.kind == tkKeyword and
+             (kk.s == "if" or kk.s == "when" or kk.s == "case" or kk.s == "try" or
+              kk.s == "block" or kk.s == "while" or kk.s == "for"):
+          break   # a control-flow body owns any `;` after it, not the StmtListExpr
         elif d == 0 and kk.kind == tkSemicolon: semis.add k
         inc k
     let inner = ps.tok(int(lo) + 1)
@@ -532,6 +536,25 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
         ps.parseIfExpr(b, int32(segLo), int32(rpIdx), t.line, t.col, true, "when")
       elif rt.kind == tkKeyword and rt.s == "case":
         ps.parseCaseExpr(b, int32(segLo), int32(rpIdx), t.line, t.col)
+      elif rt.kind == tkKeyword and rt.s == "block":
+        # `(block: s1; s2; …)` as an expression → `(block <label> (stmts …))`,
+        # its `;`-separated body bounded by the paren (not the physical line).
+        let bcolon = ps.findColon(segLo, rpIdx)
+        b.addTree "block"
+        ps.emitInfo(b, rt.line, rt.col, t.line, t.col, false)
+        if segLo + 1 < bcolon and ps.tok(segLo + 1).kind == tkIdent:
+          ps.emitName(b, ps.tok(segLo + 1), rt.line, rt.col)   # label
+        else:
+          b.addEmpty
+        let first = ps.tok(bcolon + 1)
+        b.addTree "stmts"
+        ps.emitInfo(b, first.line, first.col, rt.line, rt.col, false)
+        var sj = bcolon + 1
+        while sj < rpIdx and ps.tok(sj).kind != tkEof:
+          sj = ps.parseStmt(b, sj, first.line, first.col, rpIdx)
+          if sj < rpIdx and ps.tok(sj).kind == tkSemicolon: inc sj
+        b.endTree()   # stmts
+        b.endTree()   # block
       else:
         ps.parseExprRange(b, int32(segLo), int32(rpIdx), t.line, t.col)
       b.endTree()   # expr
