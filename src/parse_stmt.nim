@@ -735,6 +735,8 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
     of "import": return ps.parseImportLike(b, startIdx, pl, pc, "import")
     of "include": return ps.parseImportLike(b, startIdx, pl, pc, "include")
     of "export": return ps.parseImportLike(b, startIdx, pl, pc, "export")
+    of "mixin": return ps.parseImportLike(b, startIdx, pl, pc, "mixin")
+    of "bind": return ps.parseImportLike(b, startIdx, pl, pc, "bind")
     of "from": return ps.parseFromImport(b, startIdx, pl, pc)
     of "static": return ps.parseStatic(b, startIdx, pl, pc)
     of "if": return ps.parseIfLike(b, startIdx, pl, pc, "if")

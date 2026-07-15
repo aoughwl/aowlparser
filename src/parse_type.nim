@@ -395,8 +395,9 @@ proc emitFieldLine(ps: var Parser; b: var Builder; fi, lineHi: int;
   ## Emit `(fld …)` nodes for one `name(, name)* [: type] [= val]` line, with
   ## the type/value duplicated across a shared-type name group. `kl,kc` = the
   ## parent (object/of) node position.
-  # a bare `nil` marks a variant branch with no fields → `(nil)` (nifler keeps it).
-  if ps.tok(fi).kind == tkKeyword and ps.tok(fi).s == "nil":
+  # a bare `nil` or `discard` marks a variant branch with no fields → `(nil)`.
+  if ps.tok(fi).kind == tkKeyword and
+     (ps.tok(fi).s == "nil" or ps.tok(fi).s == "discard"):
     b.addTree "nil"
     ps.emitInfo(b, ps.tok(fi).line, ps.tok(fi).col, kl, kc, false)
     b.endTree()

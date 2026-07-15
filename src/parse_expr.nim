@@ -77,6 +77,13 @@ proc parseArg(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       ps.parseExprRange(b, int32(ei) + 1, hi, op.line, op.col)
       b.endTree()
       return
+  # a generic type argument led by a modifier keyword (`initTable[K, ref V]`,
+  # `HashSet[ptr X]`) must go through the TYPE parser — the expression parser
+  # drops the operand after `ref`/`ptr`/`var`/`out`.
+  if head.kind == tkKeyword and int(lo) + 1 < int(hi) and
+     (head.s == "ref" or head.s == "ptr" or head.s == "var" or head.s == "out"):
+    parseTypeRange(ps, b, lo, hi, pl, pc)
+    return
   ps.parseExprRange(b, lo, hi, pl, pc)
 
 proc parseArgList(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
