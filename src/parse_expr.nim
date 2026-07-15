@@ -53,11 +53,27 @@ proc findPostfix(ps: Parser; lo, hi: int; kind: var int): int =
       if depth > 0: dec depth
     inc i
 
+proc calleeAnchor(ps: Parser; lo, hi: int): Token =
+  ## The position at which the callee sub-expression `[lo, hi)` is emitted — the
+  ## line-info of the node `parsePrimaryRange` will build for it. That is its
+  ## OUTERMOST postfix operator (`.`/`[`/`{`/`(`, e.g. the `.` of `a.b.c`), or the
+  ## head atom when the callee is a bare primary. Used to anchor a STATEMENT-level
+  ## command at its callee's info (nifler's `newTree(nkCommand, a.info, a)`), which
+  ## for a dotted callee is the dot, not the head ident.
+  var pk = 0
+  let k = ps.findPostfix(lo, hi, pk)
+  result = if k >= 0: ps.tok(k) else: ps.tok(lo)
+
 proc parseArg(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   ## One comma-delimited element: `k: v` -> `(kv k v)`, `k = v` -> `(vv k v)`,
-  ## else a plain expression. `if`/`case`-led args keep their own colons.
+  ## else a plain expression. Keyword-led args whose own syntax owns a depth-0
+  ## `:`/`=` keep it: `if`/`case` expressions, and anonymous `proc`/`func`/
+  ## `iterator` literals (`sort(proc (a): int = …)` — the return `:` and default
+  ## `=` are the routine's, not a `kv`/`vv` pair).
   let head = ps.tok(int(lo))
-  let guardKw = head.kind == tkKeyword and (head.s == "if" or head.s == "case")
+  let guardKw = head.kind == tkKeyword and
+                (head.s == "if" or head.s == "case" or head.s == "proc" or
+                 head.s == "func" or head.s == "iterator")
   if not guardKw:
     let ci = ps.depth0Colon(int(lo), int(hi))
     if ci >= 0:
@@ -77,6 +93,20 @@ proc parseArg(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       ps.parseExprRange(b, int32(ei) + 1, hi, op.line, op.col)
       b.endTree()
       return
+  # a generic type argument led by a modifier keyword (`initTable[K, ref V]`,
+  # `HashSet[ptr X]`) must go through the TYPE parser — the expression parser
+  # drops the operand after `ref`/`ptr`/`var`/`out`.
+  if head.kind == tkKeyword and int(lo) + 1 < int(hi) and
+     (head.s == "ref" or head.s == "ptr" or head.s == "var" or head.s == "out"):
+    parseTypeRange(ps, b, lo, hi, pl, pc)
+    return
+  # an anonymous tuple TYPE as a generic arg (`initTable[string, tuple[a: int]]`):
+  # `tuple[…]` is a tuple type, not `(at tuple …)` bracket-indexing, so the type
+  # parser must own it.
+  if head.kind == tkKeyword and head.s == "tuple" and int(lo) + 1 < int(hi) and
+     ps.tok(int(lo) + 1).kind == tkBracketLe:
+    parseTypeRange(ps, b, lo, hi, pl, pc)
+    return
   ps.parseExprRange(b, lo, hi, pl, pc)
 
 proc parseArgList(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
@@ -87,6 +117,19 @@ proc parseArgList(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
     let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: int(hi)
     if aLo < aHi:
       ps.parseArg(b, int32(aLo), int32(aHi), pl, pc)
+
+proc parseBareResultBody(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+  ## The body of a branch in a parenthesized StmtListExpr RESULT (rendered bare,
+  ## without a `(stmts)` wrapper). Its content is still a statement in the classic
+  ## parser, so a command there is a STATEMENT command — callee-anchored via
+  ## parseCommand, not the expr command path's first-arg anchor. Control-flow and
+  ## plain expressions keep the bare expression rendering.
+  let head = ps.tok(int(lo))
+  let ce = ps.cmdCalleeEnd(int(lo), int(hi))
+  if head.kind == tkIdent and ce < int(hi) and ps.startsArg(ce, int(hi)):
+    ps.parseCommand(b, lo, hi, pl, pc)
+  else:
+    ps.parseExprRange(b, lo, hi, pl, pc)
 
 proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32;
                  bare: bool; tag: string) =
@@ -122,7 +165,7 @@ proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32;
       ps.emitInfo(b, kw.line, kw.col, ifTok.line, ifTok.col, false)
       let bt = ps.tok(bodyLo)
       if bare:
-        ps.parseExprRange(b, int32(bodyLo), int32(nxt), kw.line, kw.col)
+        ps.parseBareResultBody(b, int32(bodyLo), int32(nxt), kw.line, kw.col)
       else:
         b.addTree "stmts"
         ps.emitInfo(b, bt.line, bt.col, kw.line, kw.col, false)
@@ -137,7 +180,7 @@ proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32;
       ps.parseExprRange(b, int32(i + 1), int32(colon), ct.line, ct.col)
       let bt = ps.tok(bodyLo)
       if bare:
-        ps.parseExprRange(b, int32(bodyLo), int32(nxt), ct.line, ct.col)
+        ps.parseBareResultBody(b, int32(bodyLo), int32(nxt), ct.line, ct.col)
       else:
         b.addTree "stmts"
         ps.emitInfo(b, bt.line, bt.col, ct.line, ct.col, false)
@@ -146,6 +189,80 @@ proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32;
       b.endTree()
     i = nxt
   b.endTree()   # close the `if` node
+
+proc parseCaseExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+  ## `case SEL of R: A (of R: A)* (elif C: A)* (else: B)` as a value expression
+  ## (the result of a parenthesized StmtListExpr): branch bodies are BARE, not
+  ## `(stmts …)`. Bounded to `[lo, hi)`; branch keywords found at depth 0.
+  let kw = ps.tok(int(lo))
+  b.addTree "case"
+  ps.emitInfo(b, kw.line, kw.col, pl, pc, false)          # case node = 'case' kw pos
+  # selector spans from after `case` to the first depth-0 `of` (a `:` right
+  # before that `of` is the optional selector colon and is dropped).
+  var depth = 0
+  var firstOf = int(hi)
+  var j = int(lo) + 1
+  while j < int(hi):
+    let t = ps.tok(j)
+    if isOpenBracket(t.kind): inc depth
+    elif isCloseBracket(t.kind):
+      if depth > 0: dec depth
+    elif depth == 0 and t.kind == tkKeyword and t.s == "of":
+      firstOf = j; break
+    inc j
+  var selHi = firstOf
+  if selHi - 1 > int(lo) and ps.tok(selHi - 1).kind == tkColon: dec selHi
+  ps.parseExprRange(b, int32(lo) + 1, int32(selHi), kw.line, kw.col)  # selector parent = case
+  # branches
+  var i = firstOf
+  while i < int(hi):
+    let br = ps.tok(i)
+    let isOf = br.kind == tkKeyword and br.s == "of"
+    let isElse = br.kind == tkKeyword and br.s == "else"
+    # find this branch's depth-0 colon and the next depth-0 branch keyword.
+    var d = 0
+    var colon = -1
+    var nxt = int(hi)
+    var k = i + 1
+    while k < int(hi):
+      let t = ps.tok(k)
+      if isOpenBracket(t.kind): inc d
+      elif isCloseBracket(t.kind):
+        if d > 0: dec d
+      elif d == 0 and t.kind == tkColon and colon < 0:
+        colon = k
+      elif d == 0 and t.kind == tkKeyword and
+           (t.s == "of" or t.s == "elif" or t.s == "else"):
+        nxt = k; break
+      inc k
+    let bodyLo = colon + 1
+    if isOf:
+      b.addTree "of"
+      ps.emitInfo(b, br.line, br.col, kw.line, kw.col, false)
+      b.addTree "ranges"                                  # ranges carries NO line-info
+      let starts = ps.splitArgs(i + 1, colon)
+      for ai in 0 ..< starts.len:
+        let aLo = starts[ai]
+        let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: colon
+        if aLo < aHi:
+          ps.parseExprRange(b, int32(aLo), int32(aHi), br.line, br.col)  # value parent = of
+      b.endTree()                                          # ranges
+      ps.parseBareResultBody(b, int32(bodyLo), int32(nxt), br.line, br.col)   # BARE body
+      b.endTree()                                          # of
+    elif isElse:
+      b.addTree "else"
+      ps.emitInfo(b, br.line, br.col, kw.line, kw.col, false)
+      ps.parseBareResultBody(b, int32(bodyLo), int32(nxt), br.line, br.col)   # BARE body
+      b.endTree()
+    else:                                                  # elif
+      b.addTree "elif"
+      let ct = ps.tok(i + 1)
+      ps.emitInfo(b, ct.line, ct.col, kw.line, kw.col, false)
+      ps.parseExprRange(b, int32(i + 1), int32(colon), ct.line, ct.col)  # condition
+      ps.parseBareResultBody(b, int32(bodyLo), int32(nxt), ct.line, ct.col)   # BARE body
+      b.endTree()
+    i = nxt
+  b.endTree()   # close the `case` node
 
 proc parseCastExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   ## `cast[T](x)` -> `(cast T x)`; type & value both relative to the cast node.
@@ -162,16 +279,21 @@ proc parseCastExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   b.endTree()
 
 proc parseCmdKw(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
-  ## Keyword-led command in expr position, e.g. `addr x` -> `(cmd addr x)`.
+  ## Keyword-led command in EXPR position, e.g. `let p = addr x` -> `(cmd addr x)`.
+  ## Expr-context, so the node anchors at the FIRST ARGUMENT (nifler's
+  ## `commandExpr`); the keyword callee then gets a negative delta back to it.
+  ## (A keyword command that is a whole STATEMENT anchors at the callee instead —
+  ## parse_stmt routes those through `parseCommand`.)
   let kw = ps.tok(int(lo))
+  let arg0 = ps.tok(int(lo) + 1)
   b.addTree "cmd"
-  ps.emitInfo(b, kw.line, kw.col, pl, pc, false)   # cmd node = keyword pos
+  ps.emitInfo(b, arg0.line, arg0.col, pl, pc, false)   # cmd node = first-arg pos
   b.addIdent kw.s
-  ps.emitInfo(b, kw.line, kw.col, kw.line, kw.col, false)
-  ps.parseArgList(b, lo + 1, hi, kw.line, kw.col)
+  ps.emitInfo(b, kw.line, kw.col, arg0.line, arg0.col, false)
+  ps.parseArgList(b, lo + 1, hi, arg0.line, arg0.col)
   b.endTree()
 
-proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   let t = ps.tok(int(lo))
   # --- `-<number>` folds into a signed literal (nifler): only `-`, only when
   # directly adjacent (no space), only a bare numeric literal, nothing after. ---
@@ -208,22 +330,35 @@ proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
         else:
           b.addFloatLit(-n.fVal, t.col - pc, t.line - pl, "")
       return
-  # --- `ident"…"` generalized call-string-literal (adjacent, no space) ---
-  if (t.kind == tkIdent or t.kind == tkKeyword) and int(lo) + 2 == int(hi):
-    let s = ps.tok(int(lo) + 1)
+  # --- generalized call-string-literal (adjacent, no space): a dotted-ident
+  # callee immediately followed by a string literal → `(callstrlit <callee>
+  # (suf "str" "R"))`. Handles `re"x"`, `infile.changeExt".nif"`, `a.b.c"x"`.
+  # The callee must be a pure symbol/dotted-symbol chain (Nim's rule): a
+  # subscript/call ending (`args[1]"x"`) is NOT a raw string call. nifler anchors
+  # the `callstrlit` node (and `suf`) at the STRING, with the callee before it. ---
+  if (t.kind == tkIdent or t.kind == tkKeyword) and int(hi) - 1 > int(lo):
+    let s = ps.tok(int(hi) - 1)
+    let prev = ps.tok(int(hi) - 2)
     if (s.kind == tkStrLit or s.kind == tkRStrLit or s.kind == tkTripleStrLit) and
-       s.line == t.line and s.col == t.col + int32(t.s.len):
-      b.addTree "callstrlit"
-      ps.emitInfo(b, t.line, t.col, pl, pc, false)
-      b.addIdent t.s
-      ps.emitInfo(b, t.line, t.col, t.line, t.col, false)
-      b.addTree "suf"
-      ps.emitInfo(b, s.line, s.col, t.line, t.col, false)
-      b.addStrLit s.s
-      b.addStrLit "R"
-      b.endTree()
-      b.endTree()
-      return
+       s.line == prev.line and s.col == prev.endCol and
+       (prev.kind == tkIdent or prev.kind == tkKeyword):
+      # Nim's rule: the raw string call binds to a symbol reached as a plain
+      # ident or via a trailing `.field` access. A subscript/call ENDING
+      # (`args[1]"x"`) is not a raw string call, but `args[1].ext"x"` is (the
+      # callee's last step is `.ext`). So: prev is the whole callee, or it is
+      # preceded by a `.`.
+      let dotAccess = int(hi) - 2 == int(lo) or ps.tok(int(hi) - 3).kind == tkDot
+      if dotAccess:
+        b.addTree "callstrlit"
+        ps.emitInfo(b, s.line, s.col, pl, pc, false)              # node = string pos
+        ps.parseExprRange(b, lo, int32(int(hi) - 1), s.line, s.col)  # callee, rel string
+        b.addTree "suf"
+        ps.emitInfo(b, s.line, s.col, s.line, s.col, false)       # suf inherits (no info)
+        b.addStrLit s.s
+        b.addStrLit "R"
+        b.endTree()
+        b.endTree()
+        return
   # --- leading prefix operator (binds looser than postfix): `-a.b` ---
   if t.kind == tkOperator:
     b.addTree "prefix"
@@ -299,8 +434,7 @@ proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       ps.emitInfo(b, opTok.line, opTok.col, pl, pc, false)   # dot node = '.' pos
       ps.parsePrimaryRange(b, lo, int32(k), opTok.line, opTok.col)
       let r = ps.tok(k + 1)
-      b.addIdent r.s
-      ps.emitInfo(b, r.line, r.col, opTok.line, opTok.col, false)
+      ps.emitName(b, r, opTok.line, opTok.col)   # field name, or `(quoted …)`
       b.endTree()
     of pkAt:
       let rp = ps.matchClose(k)
@@ -396,6 +530,10 @@ proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
         if isOpenBracket(kk.kind): inc d
         elif isCloseBracket(kk.kind):
           if d > 0: dec d
+        elif d == 0 and kk.kind == tkKeyword and
+             (kk.s == "if" or kk.s == "when" or kk.s == "case" or kk.s == "try" or
+              kk.s == "block" or kk.s == "while" or kk.s == "for"):
+          break   # a control-flow body owns any `;` after it, not the StmtListExpr
         elif d == 0 and kk.kind == tkSemicolon: semis.add k
         inc k
     let inner = ps.tok(int(lo) + 1)
@@ -404,14 +542,18 @@ proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
                 inner.s == "case" or inner.s == "block" or inner.s == "while" or
                 inner.s == "for")
     if semis.len > 0 or ctrl:
+      # nifler emits the `expr` node with inherited info (delta 0) and stamps the
+      # `(` position on the leading `stmts` node — not the other way round.
       b.addTree "expr"
-      ps.emitInfo(b, t.line, t.col, pl, pc, false)
+      ps.emitInfo(b, pl, pc, pl, pc, false)
       # leading statements (everything before the last `;`-part)
       b.addTree "stmts"
-      ps.emitInfo(b, inner.line, inner.col, t.line, t.col, false)
+      ps.emitInfo(b, t.line, t.col, pl, pc, false)
       var segLo = int(lo) + 1
       for si in 0 ..< semis.len:
-        discard ps.parseStmt(b, segLo, inner.line, inner.col, semis[si])
+        # leading statements are children of the `stmts` node, which is anchored
+        # at the `(` (t) — not the first inner token — so pass t as their parent.
+        discard ps.parseStmt(b, segLo, t.line, t.col, semis[si])
         segLo = semis[si] + 1
       b.endTree()   # stmts
       # result expression = the final segment. As the result of a parenthesized
@@ -421,6 +563,29 @@ proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
         ps.parseTryExpr(b, int32(segLo), int32(rpIdx), t.line, t.col)
       elif rt.kind == tkKeyword and rt.s == "if":
         ps.parseIfExpr(b, int32(segLo), int32(rpIdx), t.line, t.col, true, "if")
+      elif rt.kind == tkKeyword and rt.s == "when":
+        ps.parseIfExpr(b, int32(segLo), int32(rpIdx), t.line, t.col, true, "when")
+      elif rt.kind == tkKeyword and rt.s == "case":
+        ps.parseCaseExpr(b, int32(segLo), int32(rpIdx), t.line, t.col)
+      elif rt.kind == tkKeyword and rt.s == "block":
+        # `(block: s1; s2; …)` as an expression → `(block <label> (stmts …))`,
+        # its `;`-separated body bounded by the paren (not the physical line).
+        let bcolon = ps.findColon(segLo, rpIdx)
+        b.addTree "block"
+        ps.emitInfo(b, rt.line, rt.col, t.line, t.col, false)
+        if segLo + 1 < bcolon and ps.tok(segLo + 1).kind == tkIdent:
+          ps.emitName(b, ps.tok(segLo + 1), rt.line, rt.col)   # label
+        else:
+          b.addEmpty
+        let first = ps.tok(bcolon + 1)
+        b.addTree "stmts"
+        ps.emitInfo(b, first.line, first.col, rt.line, rt.col, false)
+        var sj = bcolon + 1
+        while sj < rpIdx and ps.tok(sj).kind != tkEof:
+          sj = ps.parseStmt(b, sj, first.line, first.col, rpIdx)
+          if sj < rpIdx and ps.tok(sj).kind == tkSemicolon: inc sj
+        b.endTree()   # stmts
+        b.endTree()   # block
       else:
         ps.parseExprRange(b, int32(segLo), int32(rpIdx), t.line, t.col)
       b.endTree()   # expr
@@ -451,7 +616,14 @@ proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   else:
     b.addEmpty
 
-proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+  ## Depth-guarding wrapper (see `enterDepth`): counts recursion nesting for
+  ## `--max-depth`, then delegates. Off-by-default: inert when maxDepth == 0.
+  ps.enterDepth(ps.tok(int(lo)).line)
+  ps.parsePrimaryRangeImpl(b, lo, hi, pl, pc)
+  dec ps.depth
+
+proc parseExprRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   # Keyword-led expression forms must NOT be split by the operator scanner
   # (their conditions/bodies contain operators that are not top-level).
   let head = ps.tok(int(lo))
@@ -460,20 +632,28 @@ proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
      head.s == "iterator"):
     ps.parsePrimaryRange(b, lo, hi, pl, pc)
     return
-  let split = ps.findSplit(int(lo), int(hi))
-  if split < 0:
-    # command call in expression position (`let x = foo bar`, `move n`): a bare
-    # ident callee primary followed by a space-separated, non-operator argument.
+  # A command call whose callee starts at `lo` binds LOOSER than binary operators
+  # — `f a & b` is `f(a & b)`, not `(f a) & b` — so it must be recognised BEFORE
+  # the operator split. (A command on the RHS of an operator, `p & f a`, is found
+  # by the recursive parse of that operand; the `startsArg` guard rejects `p`'s
+  # spaced binary operator so it does not masquerade as a command here.)
+  block cmdLead:
     let ce = ps.cmdCalleeEnd(int(lo), int(hi))
     if head.kind == tkIdent and ce < int(hi) and ps.startsArg(ce, int(hi)):
-      let callee = ps.tok(int(lo))
+      # EXPRESSION-context command (`commandExpr`): nkCommand.info = the FIRST
+      # ARGUMENT's position (the cursor when the node is built), so the callee
+      # gets a negative delta back to it. (Statement-context commands anchor at
+      # the callee instead — see parse_stmt's parseCommand.)
+      let arg0 = ps.tok(ce)
       b.addTree "cmd"
-      ps.emitInfo(b, callee.line, callee.col, pl, pc, false)
-      ps.parseExprRange(b, lo, int32(ce), callee.line, callee.col)
-      ps.parseArgList(b, int32(ce), hi, callee.line, callee.col)
+      ps.emitInfo(b, arg0.line, arg0.col, pl, pc, false)
+      ps.parseExprRange(b, lo, int32(ce), arg0.line, arg0.col)
+      ps.parseArgList(b, int32(ce), hi, arg0.line, arg0.col)
       b.endTree()
-    else:
-      ps.parsePrimaryRange(b, lo, hi, pl, pc)
+      return
+  let split = ps.findSplit(int(lo), int(hi))
+  if split < 0:
+    ps.parsePrimaryRange(b, lo, hi, pl, pc)
   else:
     let op = ps.tok(split)
     b.addTree "infix"
@@ -483,3 +663,10 @@ proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
     ps.parseExprRange(b, lo, int32(split), op.line, op.col)          # left
     ps.parseExprRange(b, int32(split) + 1, hi, op.line, op.col)      # right
     b.endTree()
+
+proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+  ## Depth-guarding wrapper (see `enterDepth`): counts recursion nesting for
+  ## `--max-depth`, then delegates. Off-by-default: inert when maxDepth == 0.
+  ps.enterDepth(ps.tok(int(lo)).line)
+  ps.parseExprRangeImpl(b, lo, hi, pl, pc)
+  dec ps.depth

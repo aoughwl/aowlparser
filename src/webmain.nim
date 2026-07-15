@@ -22,8 +22,7 @@ when defined(nimony):
   {.feature: "lenientnils".}
 
 import nifbuilder
-import tokens, lexer, parser
-import webdiag              # web-only syntactic diagnostics (Diag/tokenizeD/bracketDiags)
+import tokens, lexer, parser   # lexer exports tokenize + gLexDiags; tokens exports Diagnostic/Severity
 import jsffi
 
 proc jsonEscape(s: string): string =
@@ -46,29 +45,88 @@ proc jsonEscape(s: string): string =
       else:
         result.add c
 
-proc diagsToJson(ds: seq[Diag]): string =
-  ## `[{"line":L,"col":C,"message":"..."}]` — line 1-based, col 0-based, both as
-  ## produced by the lexer/parser (the JS glue converts to Monaco's 1-based cols).
+# --- structural bracket validator (mirrors nifparser.nim's checkBrackets) -----
+proc closerFor(k: TokKind): char =
+  case k
+  of tkParLe: ')'
+  of tkBracketLe: ']'
+  else: '}'
+proc openerFor(k: TokKind): char =
+  case k
+  of tkParLe: '('
+  of tkBracketLe: '['
+  else: '{'
+proc matchesClose(open, close: TokKind): bool =
+  (open == tkParLe and close == tkParRi) or
+  (open == tkBracketLe and close == tkBracketRi) or
+  (open == tkCurlyLe and close == tkCurlyRi)
+
+proc checkBrackets(toks: seq[Token]): seq[Diagnostic] =
+  ## Unbalanced/mismatched ()/[]/{} — a validator the range-splitter never
+  ## reports. Best-effort: it never blocks the emitted NIF.
+  result = @[]
+  var stack: seq[Token] = @[]
+  for t in toks:
+    case t.kind
+    of tkParLe, tkBracketLe, tkCurlyLe:
+      stack.add t
+    of tkParRi, tkBracketRi, tkCurlyRi:
+      if stack.len == 0:
+        result.add Diagnostic(severity: sevError, code: "unmatched-close",
+          message: "unmatched '" & closerFor(t.kind) & "'",
+          line: t.line, col: t.col, endCol: t.col + 1)
+      elif not matchesClose(stack[stack.len - 1].kind, t.kind):
+        let top = stack[stack.len - 1]
+        result.add Diagnostic(severity: sevError, code: "mismatched-bracket",
+          message: "'" & closerFor(t.kind) & "' does not match '" &
+                   openerFor(top.kind) & "' opened at " & $top.line & ":" & $top.col,
+          line: t.line, col: t.col, endCol: t.col + 1)
+        stack.setLen(stack.len - 1)
+      else:
+        stack.setLen(stack.len - 1)
+    else: discard
+  for t in stack:
+    result.add Diagnostic(severity: sevError, code: "unclosed-bracket",
+      message: "unclosed '" & openerFor(t.kind) & "'",
+      line: t.line, col: t.col, endCol: t.col + 1)
+
+proc sevName(s: Severity): string =
+  case s
+  of sevError: "error"
+  of sevWarn: "warning"
+  of sevHint: "hint"
+
+proc diagsToJson(ds: seq[Diagnostic]): string =
+  ## `[{"severity","code","message","line","col","endCol"}]` — line 1-based,
+  ## col/endCol 0-based (the JS glue converts to Monaco's 1-based cols). The
+  ## severity lets the editor show warnings/hints instead of blocking on style.
   result = "["
   for i in 0 ..< ds.len:
     if i > 0: result.add ","
-    result.add "{\"line\":"
+    result.add "{\"severity\":\""
+    result.add sevName(ds[i].severity)
+    result.add "\",\"code\":\""
+    result.add ds[i].code
+    result.add "\",\"message\":\""
+    result.add jsonEscape(ds[i].message)
+    result.add "\",\"line\":"
     result.add $ds[i].line
     result.add ",\"col\":"
     result.add $ds[i].col
-    result.add ",\"message\":\""
-    result.add jsonEscape(ds[i].msg)
-    result.add "\"}"
+    result.add ",\"endCol\":"
+    result.add $ds[i].endCol
+    result.add "}"
   result.add "]"
 
 proc parseToStr(src, fileField: string; curly: bool; diagJson: var string): string =
   ## Parse Nim source text from memory to the `.p.nif` byte string, and set
-  ## `diagJson` to the JSON array of syntactic diagnostics (side-channel).
-  ## `curly` enables the experimental `{ … }` block-body mode (see initParser).
-  let lexed = tokenizeD(src)
-  let toks = lexed.toks
-  var ds = lexed.diags
-  for d in bracketDiags(toks): ds.add d
+  ## `diagJson` to the JSON array of RECOVERABLE structured diagnostics (lexer
+  ## checks + bracket validation). Parsing is never aborted by them — an editor
+  ## gets every problem at once. `curly` enables the experimental `{ … }` mode.
+  var errors = 0
+  let toks = tokenize(src, defaultLexOptions, errors)
+  var ds = gLexDiags                             # lexer diagnostics from tokenize
+  for d in checkBrackets(toks): ds.add d
   diagJson = diagsToJson(ds)
   var ps = initParser(toks, fileField, curly)
   var b = nifbuilder.open(src.len * 4 + 256)   # in-memory builder

@@ -18,9 +18,22 @@ type
     toks: seq[Token]
     file: string
     curly*: bool   ## experimental: accept `{ … }` as a block body alongside `:`
+    depth*: int    ## live recursion nesting through the main parse entry points
+    maxDepth*: int ## abort ceiling for `depth` (0 = unlimited, the default)
 
-proc initParser*(toks: seq[Token]; file: string; curly = false): Parser =
-  Parser(toks: toks, file: file, curly: curly)
+proc initParser*(toks: seq[Token]; file: string; curly = false;
+                 maxDepth = 0): Parser =
+  Parser(toks: toks, file: file, curly: curly, depth: 0, maxDepth: maxDepth)
+
+proc enterDepth(ps: var Parser; line: int32) =
+  ## Bump the recursion counter and abort (non-zero exit) if `--max-depth` is
+  ## in force and the nesting exceeds it. Callers pair this with `dec ps.depth`
+  ## once the recursive entry returns. Cheap and inert when maxDepth == 0.
+  inc ps.depth
+  if ps.maxDepth > 0 and ps.depth > ps.maxDepth:
+    write stderr, "nifparser: parse nesting exceeded --max-depth:" &
+      $ps.maxDepth & " (near line " & $line & ")\n"
+    quit 1
 
 # ---------------------------------------------------------------------------
 # token helpers
@@ -60,13 +73,17 @@ proc opIsInfix(ps: Parser; i, lo: int): bool =
   result = true
 
 proc startsArg(ps: Parser; i, hi: int): bool =
-  ## Whether token `i` can begin a command argument: an expression atom, or a
-  ## prefix operator directly attached to its operand (`$v`, `@x`, `-1`).
+  ## Whether token `i` (the token right after a callee primary) begins a command
+  ## argument: an expression atom, or a PREFIX operator (`echo -1`, `f $v`).
+  ## A prefix arg has a space BEFORE the operator but not after; with no leading
+  ## space the operator is infix (`c.len-1`), so it is not a command.
   let t = ps.tok(i)
   if t.kind == tkOperator:
     if i + 1 >= hi: return false
+    let prev = ps.tok(i - 1)
+    let leadSpace = t.line != prev.line or t.col > prev.endCol
     let nxt = ps.tok(i + 1)
-    return nxt.line == t.line and nxt.col == t.endCol   # adjacent operand
+    return leadSpace and nxt.line == t.line and nxt.col == t.endCol
   result = startsExpr(t) and not isBinaryOp(t)
 
 proc cmdCalleeEnd(ps: Parser; lo, hi: int): int =
@@ -107,8 +124,12 @@ proc emitName(ps: Parser; b: var Builder; t: Token; pl, pc: int32) =
   if t.quoted:
     b.addTree "quoted"
     ps.emitInfo(b, t.line, t.col, pl, pc, false)
-    for p in t.parts:
-      b.addIdent p
+    # each piece carries line-info at its real source column, relative to the
+    # `quoted` node (nifler: `` `value=` `` → `value@1 =@6`).
+    for i in 0 ..< t.parts.len:
+      b.addIdent t.parts[i]
+      let pcol = if i < t.partCols.len: t.partCols[i] else: t.col
+      ps.emitInfo(b, t.line, pcol, t.line, t.col, false)
     b.endTree()
   else:
     b.addIdent t.s
@@ -162,7 +183,8 @@ proc precedenceOf(t: Token): int =
 proc startsExpr(t: Token): bool =
   case t.kind
   of tkIdent, tkKeyword, tkIntLit, tkFloatLit, tkStrLit, tkRStrLit,
-     tkTripleStrLit, tkCharLit, tkParLe, tkBracketLe, tkCurlyLe:
+     tkTripleStrLit, tkCharLit, tkParLe, tkBracketLe, tkCurlyLe,
+     tkOperator:   # a leading operator is a prefix: `return -1`, `return @[…]`
     true
   else:
     false
@@ -292,11 +314,17 @@ proc splitArgs(ps: Parser; lo, hi: int): seq[int] =
 # ---------------------------------------------------------------------------
 # parse_expr.nim implements:
 proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
+proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
+proc parseCaseExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
 # parse_stmt.nim implements:
 proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
                hiLimit: int): int
+proc parseCommand(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
 proc parseTry(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int
 proc parseTryExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
+proc parsePostExprBlock(ps: var Parser; b: var Builder; headLo, colonIdx: int;
+                        pl, pc: int32): int
+proc skipTrailingDoc(ps: Parser; i, refIndent: int): int
 proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
                   tag: string): int
 # parse_type.nim implements:

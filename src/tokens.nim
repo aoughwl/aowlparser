@@ -38,6 +38,28 @@ type
     tkDot            ## .
     tkComment        ## a `##` doc comment (regular `#` comments are skipped)
 
+  Severity* = enum
+    ## Diagnostic severity. `sevError` participates in `--strict` (non-zero exit)
+    ## and marks output the compiler frontend would reject; `sevWarn`/`sevHint`
+    ## are advisory (style/portability) and never block.
+    sevHint
+    sevWarn
+    sevError
+
+  Diagnostic* = object
+    ## A recoverable parse/lex diagnostic with a source span. nifparser NEVER
+    ## aborts on these (unlike nifler, which stops at the first error): it records
+    ## them, keeps parsing, and still emits best-effort NIF — so an editor can show
+    ## every problem at once. `code` is a short stable slug (e.g. "unknown-byte",
+    ## "unclosed-bracket") for filtering; `line`/`col` are 1-based/0-based like a
+    ## Token, `endCol` bounds the span on `line` (== col for a point).
+    severity*: Severity
+    code*: string
+    message*: string
+    line*: int32
+    col*: int32
+    endCol*: int32
+
   Token* = object
     kind*: TokKind
     s*: string       ## identifier / operator / decoded string literal text
@@ -50,6 +72,7 @@ type
     indent*: int32   ## column if first token on its line, else -1
     quoted*: bool    ## accent-quoted identifier (`` `foo bar` ``)
     parts*: seq[string]  ## child pieces of an accent-quoted ident (accQuoted rule)
+    partCols*: seq[int32]  ## 0-based source column of each piece (for line-info)
 
 const
   Keywords* = [

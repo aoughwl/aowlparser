@@ -32,6 +32,12 @@ proc prefixTypeTag(s: string): string =
 proc typeExprEnd(ps: var Parser; lo: int): int =
   ## End (exclusive) of an inline type expression starting at `lo`. Stops at a
   ## depth-0 `,` `;` `:` `)` `]` `}` `{` (pragma) or `=`, or a new logical line.
+  ## Exception: a `proc`/`iterator` TYPE owns the return colon after its param
+  ## parens (`proc (a): int`) — that `:` must not end the type, else the `=`
+  ## default that follows is dropped.
+  let procType = ps.tok(lo).kind == tkKeyword and
+                 (ps.tok(lo).s == "proc" or ps.tok(lo).s == "iterator")
+  var retPending = false          # proc param parens closed; the next `:` is the return
   var depth = 0
   var i = lo
   let startLine = ps.tok(lo).line
@@ -44,8 +50,11 @@ proc typeExprEnd(ps: var Parser; lo: int): int =
     elif isCloseBracket(t.kind):
       if depth == 0: break
       dec depth
+      if depth == 0 and procType and t.kind == tkParRi: retPending = true
     elif depth == 0:
-      if t.kind == tkComma or t.kind == tkSemicolon or t.kind == tkColon:
+      if t.kind == tkColon and retPending:
+        retPending = false        # consume the proc return colon, keep scanning
+      elif t.kind == tkComma or t.kind == tkSemicolon or t.kind == tkColon:
         break
       elif t.kind == tkOperator and t.s == "=":
         break
@@ -56,7 +65,7 @@ proc typeExprEnd(ps: var Parser; lo: int): int =
 
 # --- type expressions --------------------------------------------------------
 
-proc parseTypeRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+proc parseTypeRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   ## Emit ONE type expression covering tokens `[lo, hi)`.
   if lo >= hi:
     b.addEmpty
@@ -113,6 +122,29 @@ proc parseTypeRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
     parseTypeRange(ps, b, int32(sp) + 1, hi, op.line, op.col)
     b.endTree()
     return
+  # command in type position: `lent string`, `sink T`, `owned Foo` → `(cmd lent
+  # string)`. Must precede the postfix `[]`/`.` checks so `sink seq[string]`
+  # binds as `sink (seq[string])`, not `(sink seq)[string]` — a leading modifier
+  # keyword has a SPACE before its argument, so cmdCalleeEnd stops at it, whereas
+  # `seq[string]` (adjacent `[`) keeps the bracket in the callee (ce == hi).
+  block:
+    let ce = ps.cmdCalleeEnd(int(lo), int(hi))
+    if ps.tok(int(lo)).kind == tkIdent and ce < int(hi) and ps.startsArg(ce, int(hi)):
+      # A command in TYPE position (`lent T`, `sink seq[int]`) is an
+      # expression-context command: nkCommand.info = the FIRST ARGUMENT, so the
+      # callee gets a negative delta back (like parse_expr's value commands).
+      let arg0 = ps.tok(ce)
+      b.addTree "cmd"
+      ps.emitInfo(b, arg0.line, arg0.col, pl, pc, false)
+      parseTypeRange(ps, b, lo, int32(ce), arg0.line, arg0.col)
+      let starts = ps.splitArgs(ce, int(hi))
+      for ai in 0 ..< starts.len:
+        let aLo = starts[ai]
+        let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: int(hi)
+        if aLo < aHi:
+          parseTypeRange(ps, b, int32(aLo), int32(aHi), arg0.line, arg0.col)
+      b.endTree()
+      return
   # postfix bracket → `(at base args...)`
   if ps.tok(int(hi) - 1).kind == tkBracketRi:
     # find the matching '[' at depth 0
@@ -159,26 +191,24 @@ proc parseTypeRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       parseTypeRange(ps, b, int32(d) + 1, hi, dt.line, dt.col)
       b.endTree()
       return
-  # command in type position: `lent string`, `sink T`, `owned Foo` → `(cmd lent string)`
-  block:
-    let ce = ps.cmdCalleeEnd(int(lo), int(hi))
-    if ps.tok(int(lo)).kind == tkIdent and ce < int(hi) and ps.startsArg(ce, int(hi)):
-      let callee = ps.tok(int(lo))
-      b.addTree "cmd"
-      ps.emitInfo(b, callee.line, callee.col, pl, pc, false)
-      parseTypeRange(ps, b, lo, int32(ce), callee.line, callee.col)
-      let starts = ps.splitArgs(ce, int(hi))
-      for ai in 0 ..< starts.len:
-        let aLo = starts[ai]
-        let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: int(hi)
-        if aLo < aHi:
-          parseTypeRange(ps, b, int32(aLo), int32(aHi), callee.line, callee.col)
-      b.endTree()
-      return
-  # atom (single ident/keyword type name)
+  # atom: a single type name (ident/keyword, or `(quoted …)` for a backtick
+  # operand like `varargs[string, ` $ `]`). Anything else that fell through the
+  # type-specific forms is an EXPRESSION in type-arg position — a literal
+  # (`array[4, byte]`) or a call/range bound (`array[succ(low(X))..high(X), T]`)
+  # — which the expression emitter renders correctly (an int must not be
+  # `addIdent`-escaped to `\34`, a call must keep its arguments).
   let t = ps.tok(int(lo))
-  b.addIdent t.s
-  ps.emitInfo(b, t.line, t.col, pl, pc, false)
+  if int(lo) + 1 >= int(hi) and (t.kind == tkIdent or t.kind == tkKeyword):
+    ps.emitName(b, t, pl, pc)
+  else:
+    ps.parseExprRange(b, lo, hi, pl, pc)
+
+proc parseTypeRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+  ## Depth-guarding wrapper (see `enterDepth`): counts recursion nesting for
+  ## `--max-depth`, then delegates. Off-by-default: inert when maxDepth == 0.
+  ps.enterDepth(ps.tok(int(lo)).line)
+  ps.parseTypeRangeImpl(b, lo, hi, pl, pc)
+  dec ps.depth
 
 proc parseType(ps: var Parser; b: var Builder; idx: int; pl, pc: int32): int =
   ## Inline type expression starting at token `idx`. Returns the index after it.
@@ -227,7 +257,10 @@ proc parseTupleInline(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       if i < rb and (ps.tok(i).kind == tkComma or ps.tok(i).kind == tkSemicolon): inc i
       for nm in names:
         b.addTree "kv"
-        ps.emitInfo(b, nm.line, nm.col, kw.line, kw.col, false)
+        # nifler emits each tuple field relative to the tuple's PARENT
+        # (relLineInfo(def[j], parent) — not the tuple node), so the kv's parent
+        # anchor is (pl, pc), the position passed in for the tuple itself.
+        ps.emitInfo(b, nm.line, nm.col, pl, pc, false)
         b.addIdent nm.s
         ps.emitInfo(b, nm.line, nm.col, nm.line, nm.col, false)
         if tLo >= 0:
@@ -312,8 +345,7 @@ proc emitTypevarGroup(ps: var Parser; b: var Builder; gLo, gHi: int;
   for nm in names:
     b.addTree "typevar"
     ps.emitInfo(b, nm.line, nm.col, tvL, tvC, false)        # typevar node = name pos
-    b.addIdent nm.s
-    ps.emitInfo(b, nm.line, nm.col, nm.line, nm.col, false)
+    ps.emitName(b, nm, nm.line, nm.col)   # typevar name, or `(quoted …)`
     b.addEmpty                                              # export (always .)
     b.addEmpty                                              # pragma
     if cLo >= 0:
@@ -330,18 +362,24 @@ proc parseGenerics(ps: var Parser; b: var Builder; lbIdx: int; pl, pc: int32): i
   let rb = ps.matchClose(lbIdx)
   b.addTree "typevars"
   ps.emitInfo(b, lb.line, lb.col, pl, pc, false)           # typevars node = '[' pos
-  # split groups on ';'
+  # Split into param groups on `;`, and on a `,` that follows a depth-0 `:`
+  # constraint (`[T: A, L: B]` = two params) — a `,` BEFORE any `:` builds a
+  # shared-constraint name list (`[T, U: C]` = one group).
   var gstart = lbIdx + 1
   var i = lbIdx + 1
   var depth = 0
+  var seenColon = false
   while i < rb:
     let k = ps.tok(i).kind
     if isOpenBracket(k): inc depth
     elif isCloseBracket(k):
       if depth > 0: dec depth
-    elif depth == 0 and ps.tok(i).kind == tkSemicolon:
+    elif depth == 0 and (k == tkSemicolon or (k == tkComma and seenColon)):
       ps.emitTypevarGroup(b, gstart, i, lb.line, lb.col)
       gstart = i + 1
+      seenColon = false
+    elif depth == 0 and k == tkColon:
+      seenColon = true
     inc i
   if gstart < rb:
     ps.emitTypevarGroup(b, gstart, rb, lb.line, lb.col)
@@ -380,6 +418,13 @@ proc emitFieldLine(ps: var Parser; b: var Builder; fi, lineHi: int;
   ## Emit `(fld …)` nodes for one `name(, name)* [: type] [= val]` line, with
   ## the type/value duplicated across a shared-type name group. `kl,kc` = the
   ## parent (object/of) node position.
+  # a bare `nil` or `discard` marks a variant branch with no fields → `(nil)`.
+  if ps.tok(fi).kind == tkKeyword and
+     (ps.tok(fi).s == "nil" or ps.tok(fi).s == "discard"):
+    b.addTree "nil"
+    ps.emitInfo(b, ps.tok(fi).line, ps.tok(fi).col, kl, kc, false)
+    b.endTree()
+    return
   var j = fi
   var names: seq[Token] = @[]
   var exports: seq[bool] = @[]
@@ -412,18 +457,24 @@ proc emitFieldLine(ps: var Parser; b: var Builder; fi, lineHi: int;
     vLo = j + 1
   for ni in 0 ..< names.len:
     let nm = names[ni]
+    # Field name-node anchor, mirroring the classic wrapping (see parseSectionDef):
+    # a pragma wraps it in nkPragmaExpr at the `{.`; an export alone is nkPostfix
+    # at the `*` (directly after the name, nm.endCol); a plain name at itself.
+    let aCol =
+      if firstPragLo >= 0: ps.tok(firstPragLo).col
+      elif exports[ni]: nm.endCol
+      else: nm.col
     b.addTree "fld"
-    ps.emitInfo(b, nm.line, nm.col, kl, kc, false)
-    b.addIdent nm.s
-    ps.emitInfo(b, nm.line, nm.col, nm.line, nm.col, false)
+    ps.emitInfo(b, nm.line, aCol, kl, kc, false)
+    ps.emitName(b, nm, nm.line, aCol)   # field name atom, or `(quoted …)`
     if exports[ni]: b.addRaw " x" else: b.addEmpty
-    ps.emitPragmaSlot(b, firstPragLo, firstPragHi, nm.line, nm.col)
+    ps.emitPragmaSlot(b, firstPragLo, firstPragHi, nm.line, aCol)
     if tLo >= 0:
-      parseTypeRange(ps, b, int32(tLo), int32(tHi), nm.line, nm.col)
+      parseTypeRange(ps, b, int32(tLo), int32(tHi), nm.line, aCol)
     else:
       b.addEmpty
     if vLo >= 0:
-      ps.parseExprRange(b, int32(vLo), int32(lineHi), nm.line, nm.col)
+      ps.parseExprRange(b, int32(vLo), int32(lineHi), nm.line, aCol)
     else:
       b.addEmpty
     b.endTree()
@@ -619,8 +670,7 @@ proc parseEnum(ps: var Parser; b: var Builder; enumIdx, defIndent: int;
     let nodeTok = if vLo >= 0: ps.tok(vLo) else: nameTok
     b.addTree "efld"
     ps.emitInfo(b, nodeTok.line, nodeTok.col, kw.line, kw.col, false)
-    b.addIdent nameTok.s
-    ps.emitInfo(b, nameTok.line, nameTok.col, nodeTok.line, nodeTok.col, false)
+    ps.emitName(b, nameTok, nodeTok.line, nodeTok.col)   # efld name, or `(quoted …)`
     b.addEmpty                                             # export: always .
     ps.emitPragmaSlot(b, pragLo, pragHi, nodeTok.line, nodeTok.col)
     b.addEmpty                                             # type: always .
@@ -694,8 +744,7 @@ proc parseTypeDef(ps: var Parser; b: var Builder; nameIdx, typeKwCol: int;
   b.addTree "type"
   ps.emitInfo(b, eqTok.line, eqTok.col, pl, pc, false)     # type node = '=' pos
   # name
-  b.addIdent nameTok.s
-  ps.emitInfo(b, nameTok.line, nameTok.col, eqTok.line, eqTok.col, false)
+  ps.emitName(b, nameTok, eqTok.line, eqTok.col)   # type name, or `(quoted …)`
   # export
   if hasExport: b.addRaw " x" else: b.addEmpty
   # generics
@@ -809,8 +858,7 @@ proc parseParams(ps: var Parser; b: var Builder; lpIdx: int; pl, pc: int32): int
       let nm = names[ni]
       b.addTree "param"
       ps.emitInfo(b, nm.line, nm.col, lp.line, lp.col, false)
-      b.addIdent nm.s
-      ps.emitInfo(b, nm.line, nm.col, nm.line, nm.col, false)
+      ps.emitName(b, nm, nm.line, nm.col)   # param name atom, or `(quoted …)`
       if exports[ni]: b.addRaw " x" else: b.addEmpty
       ps.emitPragmaSlot(b, firstPragLo, firstPragHi, nm.line, nm.col)
       if tLo >= 0:
@@ -825,9 +873,11 @@ proc parseParams(ps: var Parser; b: var Builder; lpIdx: int; pl, pc: int32): int
     if i < rpIdx and (ps.tok(i).kind == tkComma or ps.tok(i).kind == tkSemicolon):
       inc i
   b.endTree()  # close params
-  # return type sibling
+  # return type sibling — introduced by `:` (proc/param types) or `->` (`do`
+  # blocks, `sort do (a, b) -> int:`).
   var j = rpIdx + 1
-  if ps.tok(j).kind == tkColon:
+  if ps.tok(j).kind == tkColon or
+     (ps.tok(j).kind == tkOperator and ps.tok(j).s == "->"):
     inc j
     j = ps.parseType(b, j, lp.line, lp.col)                 # ret parent = params node
   else:
@@ -838,16 +888,23 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
                   tag: string): int =
   let kw = ps.tok(kwIdx)
   b.addTree tag
-  ps.emitInfo(b, kw.line, kw.col, pl, pc, false)           # routine node = keyword pos
   var i = kwIdx + 1
   # name — absent for an anonymous routine (`proc (x): T = …`), where the next
   # token is directly the params `(`/generics `[`/pragma `{`/`=`.
   let name = ps.tok(i)
-  if name.kind == tkParLe or name.kind == tkBracketLe or name.kind == tkCurlyLe or
-     (name.kind == tkOperator and name.s == "="):
+  let anon = name.kind == tkParLe or name.kind == tkBracketLe or
+             name.kind == tkCurlyLe or (name.kind == tkOperator and name.s == "=")
+  # An anonymous routine is an nkLambda whose info nifler takes from the token
+  # AFTER `proc` (the params `(`/generics `[`/`=`), and it stamps that on the empty
+  # NAME placeholder — not the proc node — with every child emitted relative to it.
+  # A NAMED routine anchors at the keyword. `aTok` is that per-kind anchor.
+  let aTok = if anon: name else: kw
+  if anon:
     b.addEmpty
+    ps.emitInfo(b, aTok.line, aTok.col, pl, pc, false)     # info on the empty name
   else:
-    ps.emitName(b, name, kw.line, kw.col)
+    ps.emitInfo(b, aTok.line, aTok.col, pl, pc, false)     # routine node = keyword pos
+    ps.emitName(b, name, aTok.line, aTok.col)
     inc i
   # export marker `*`
   if ps.tok(i).kind == tkOperator and ps.tok(i).s == "*":
@@ -858,20 +915,30 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
   b.addEmpty  # pattern
   # generics
   if ps.tok(i).kind == tkBracketLe:
-    i = ps.parseGenerics(b, i, kw.line, kw.col)
+    i = ps.parseGenerics(b, i, aTok.line, aTok.col)
   else:
     b.addEmpty
   # params + return type
   if ps.tok(i).kind == tkParLe:
-    i = ps.parseParams(b, i, kw.line, kw.col)
+    i = ps.parseParams(b, i, aTok.line, aTok.col)
   else:
-    b.addEmpty  # params slot
-    b.addEmpty  # return type slot
+    # no param parens (`proc main =`, `proc main: int =`): nifler still emits an
+    # empty `(params)` node (positioned where the params would begin), then the
+    # return type sibling if a `:` follows.
+    let at = ps.tok(i)
+    b.addTree "params"
+    ps.emitInfo(b, at.line, at.col, aTok.line, aTok.col, false)
+    b.endTree()
+    if ps.tok(i).kind == tkColon:
+      inc i
+      i = ps.parseType(b, i, at.line, at.col)                 # ret parent = params pos
+    else:
+      b.addEmpty  # return type slot
   # pragmas: `{.` … `.}`. In curly mode a bare `{` (no leading dot) is a block
   # BODY, not pragmas — leave it for the body handler below.
   if ps.tok(i).kind == tkCurlyLe and
      (not ps.curly or ps.tok(i + 1).kind == tkDot):
-    i = ps.parsePragmas(b, i, kw.line, kw.col)
+    i = ps.parsePragmas(b, i, aTok.line, aTok.col)
   else:
     b.addEmpty
   b.addEmpty  # reserved / misc
@@ -884,7 +951,7 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
     let rb = ps.matchClose(i)
     let first = ps.tok(i + 1)
     b.addTree "stmts"
-    ps.emitInfo(b, first.line, first.col, kw.line, kw.col, false)
+    ps.emitInfo(b, first.line, first.col, aTok.line, aTok.col, false)
     var j = i + 1
     while j < rb and ps.tok(j).kind != tkEof:
       if ps.tok(j).kind == tkComment: inc j; continue
@@ -900,16 +967,17 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
     elif first.indent < 0:
       # one-line body on the same line as `=`, e.g. `proc f() = echo 1`
       b.addTree "stmts"
-      ps.emitInfo(b, first.line, first.col, kw.line, kw.col, false)
+      ps.emitInfo(b, first.line, first.col, aTok.line, aTok.col, false)
       let hi = ps.lineEnd(i)
       while i < hi and ps.tok(i).kind != tkEof:
         i = ps.parseStmt(b, i, first.line, first.col, -1)
       b.endTree()
     elif first.indent > refIndent:
       b.addTree "stmts"
-      ps.emitInfo(b, first.line, first.col, kw.line, kw.col, false)
+      ps.emitInfo(b, first.line, first.col, aTok.line, aTok.col, false)
       while ps.tok(i).kind != tkEof and ps.tok(i).indent > refIndent:
         i = ps.parseStmt(b, i, first.line, first.col, -1)
+        i = ps.skipTrailingDoc(i, first.indent)   # drop each stmt's trailing `##` doc
       b.endTree()
     else:
       b.addEmpty

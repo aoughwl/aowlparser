@@ -16,12 +16,16 @@
 ## threshold on `ps.tok(i).indent` (see `emitBody`).
 
 proc parseCommand(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
-  let callee = ps.tok(int(lo))
+  # STATEMENT-context command (`parseExprStmt` → `newTree(nkCommand, a.info, a)`):
+  # nkCommand.info = the CALLEE expression's info. For a dotted callee `a.b` that
+  # is the `.` position, not the head ident — so anchor at the callee's emitted
+  # node, not `tok(lo)`. (Expr-context commands anchor at the first arg instead.)
   let ce = ps.cmdCalleeEnd(int(lo), int(hi))   # end of the callee primary
+  let anchor = ps.calleeAnchor(int(lo), ce)
   b.addTree "cmd"
-  ps.emitInfo(b, callee.line, callee.col, pl, pc, false)   # cmd node info = callee pos
-  ps.parseExprRange(b, lo, int32(ce), callee.line, callee.col)   # callee (may be dotted)
-  ps.parseArgList(b, int32(ce), hi, callee.line, callee.col)
+  ps.emitInfo(b, anchor.line, anchor.col, pl, pc, false)   # cmd node info = callee pos
+  ps.parseExprRange(b, lo, int32(ce), anchor.line, anchor.col)   # callee (may be dotted)
+  ps.parseArgList(b, int32(ce), hi, anchor.line, anchor.col)
   b.endTree()
 
 proc parseExprStmt(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32): int =
@@ -34,10 +38,14 @@ proc parseExprStmt(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32): int =
   # so a named-arg `=` in a command (`f a, k = v`) is not read as an `asgn`.
   let head = ps.tok(int(lo))
   let ce = ps.cmdCalleeEnd(int(lo), int(hi))   # end of callee primary
-  let isCmd =
-    (head.kind == tkIdent) and
-    ce < int(hi) and
-    ps.startsArg(ce, int(hi))
+  # A command callee is a bare ident, or the `addr` keyword in its space form
+  # (`addr x`; `addr(x)` is a call, and cmdCalleeEnd already folds the adjacent
+  # paren into the callee so `ce == hi` there). Routing a keyword command through
+  # parseCommand — not parseCmdKw — gives it the STATEMENT-context callee anchor
+  # (nifler's `newTree(nkCommand, a.info)`), not the expr-context first-arg anchor.
+  let calleeOk = head.kind == tkIdent or
+                 (head.kind == tkKeyword and head.s == "addr")
+  let isCmd = calleeOk and ce < int(hi) and ps.startsArg(ce, int(hi))
   if isCmd:
     ps.parseCommand(b, lo, hi, pl, pc)
     return
@@ -76,6 +84,34 @@ proc parseImportLike(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
                      tag: string): int =
   let kw = ps.tok(kwIdx)
   let hi = ps.semiEnd(kwIdx, ps.lineEnd(kwIdx))
+  # `import M except a, b` → `(importexcept M a b)`: a depth-0 `except` after the
+  # module turns the section into an exclusion list (mirrors the classic parser's
+  # import→importexcept transition). The module before `except` is one expr.
+  if (tag == "import" or tag == "export"):
+    var d = 0
+    var exceptIdx = -1
+    var j = kwIdx + 1
+    while j < hi:
+      let t = ps.tok(j)
+      if isOpenBracket(t.kind): inc d
+      elif isCloseBracket(t.kind):
+        if d > 0: dec d
+      elif d == 0 and t.kind == tkKeyword and t.s == "except":
+        exceptIdx = j; break
+      inc j
+    if exceptIdx >= 0:
+      b.addTree(if tag == "import": "importexcept" else: "exportexcept")
+      ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
+      if kwIdx + 1 < exceptIdx:
+        ps.parseExprRange(b, int32(kwIdx + 1), int32(exceptIdx), kw.line, kw.col)
+      let estarts = ps.splitArgs(exceptIdx + 1, hi)
+      for ai in 0 ..< estarts.len:
+        let aLo = estarts[ai]
+        let aHi = if ai + 1 < estarts.len: estarts[ai+1] - 1 else: hi
+        if aLo < aHi:
+          ps.parseExprRange(b, int32(aLo), int32(aHi), kw.line, kw.col)
+      b.endTree()
+      return hi
   b.addTree tag
   ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
   let starts = ps.splitArgs(kwIdx + 1, hi)
@@ -97,6 +133,16 @@ proc isOperandEnd(k: TokKind): bool =
   k == tkIdent or k == tkParRi or k == tkBracketRi or k == tkCurlyRi or
   k == tkStrLit or k == tkRStrLit or k == tkTripleStrLit or
   k == tkIntLit or k == tkFloatLit or k == tkCharLit
+
+proc skipTrailingDoc(ps: Parser; i, refIndent: int): int =
+  ## Drop a trailing doc comment: a `##` line indented DEEPER than `refIndent`
+  ## (the enclosing statement list's indent) documents the preceding declaration.
+  ## nifler attaches it to that node (`indAndComment`) and, without `--docs`, does
+  ## not emit it. A comment AT `refIndent` is a standalone `(comment)` statement
+  ## and is kept by the caller's normal statement dispatch.
+  result = i
+  while ps.tok(result).kind == tkComment and ps.tok(result).indent > refIndent:
+    inc result
 
 proc findColon(ps: Parser; lo, hi: int): int =
   ## Body introducer in `[lo, hi)`: a depth-0 `:`. In curly mode, also a depth-0
@@ -182,7 +228,34 @@ proc emitBody(ps: var Parser; b: var Builder; colonIdx: int; refIndent: int32;
     # of `let x = try:` sits mid-line so its keyword column is not its indent.
     let bodyRef = first.indent - 1
     while ps.tok(i).kind != tkEof and ps.tok(i).indent > bodyRef:
-      i = ps.parseStmt(b, i, first.line, first.col, -1)
+      # An inline branch keyword (`else`/`elif`/…) can follow the body on its own
+      # line: `if c:\n  callBody() else: x`. Bound this statement at that keyword
+      # so it is not swallowed as a command arg — the caller picks up the branch.
+      var stmtHi = -1
+      block:
+        var d = 0
+        var k = i
+        var sawCf = false   # a depth-0 if/when/case/try owns any following else/elif/of
+        let lend = ps.lineEnd(i)
+        while k < lend:
+          let kk = ps.tok(k)
+          if isOpenBracket(kk.kind): inc d
+          elif isCloseBracket(kk.kind):
+            if d > 0: dec d
+          elif d == 0 and kk.kind == tkKeyword and
+               (kk.s == "if" or kk.s == "when" or kk.s == "case" or kk.s == "try"):
+            sawCf = true
+          elif d == 0 and k > i and not sawCf and kk.kind == tkKeyword and
+               kk.indent < 0 and
+               (kk.s == "elif" or kk.s == "else" or kk.s == "of" or
+                kk.s == "except" or kk.s == "finally"):
+            # a branch keyword that belongs to the ENCLOSING control flow
+            # (`if c:\n  body() else: x`), not to an if/case EXPRESSION in this
+            # statement's own args (`f(if c: a else: b)`).
+            stmtHi = k; break
+          inc k
+      i = ps.parseStmt(b, i, first.line, first.col, int32(stmtHi))
+      i = ps.skipTrailingDoc(i, first.indent)   # drop the stmt's trailing `##` doc
   b.endTree()
   result = i
 
@@ -316,24 +389,36 @@ proc parseFor(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int =
     for ai in 0 ..< starts.len:
       let v = ps.tok(starts[ai])
       b.addTree "let"
-      b.addIdent v.s
-      ps.emitInfo(b, v.line, v.col, firstVar.line, firstVar.col, false)  # name rel for node
+      ps.emitName(b, v, firstVar.line, firstVar.col)   # loop var, or `(quoted …)`
       b.addEmpty 4   # export, pragma, type, value
       b.endTree()
     b.endTree()
   else:
-    # flat: one `(let name . . . .)` per loop var
+    # flat: one `(let name . . . .)` per loop var, but a loop var that is itself a
+    # `(a, b)` tuple becomes a nested `(unpacktup (let a …) …)` — e.g. the mixed
+    # `for i, (a, b) in pairs`.
     b.addTree "unpackflat"
     let starts = ps.splitArgs(kwIdx + 1, inIdx)
     for ai in 0 ..< starts.len:
       let v = ps.tok(starts[ai])
-      b.addTree "let"
-      b.addIdent v.s
-      ps.emitInfo(b, v.line, v.col, firstVar.line, firstVar.col, false)
-      b.addEmpty      # export marker
-      b.addEmpty      # pragma
-      b.addEmpty 2    # type, value
-      b.endTree()
+      if v.kind == tkParLe:
+        let rp = ps.matchClose(starts[ai])
+        b.addTree "unpacktup"
+        let inner = ps.splitArgs(starts[ai] + 1, rp)
+        for bi in 0 ..< inner.len:
+          let iv = ps.tok(inner[bi])
+          b.addTree "let"
+          ps.emitName(b, iv, firstVar.line, firstVar.col)
+          b.addEmpty 4   # export, pragma, type, value
+          b.endTree()
+        b.endTree()
+      else:
+        b.addTree "let"
+        ps.emitName(b, v, firstVar.line, firstVar.col)   # loop var, or `(quoted …)`
+        b.addEmpty      # export marker
+        b.addEmpty      # pragma
+        b.addEmpty 2    # type, value
+        b.endTree()
     b.endTree()
   # body LAST (parent = for node)
   result = ps.emitBody(b, colon, refIndent, firstVar.line, firstVar.col)
@@ -415,7 +500,13 @@ proc parseTry(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int =
       b.addTree "except"
       ps.emitInfo(b, br.line, br.col, kw.line, kw.col, false)
       if i + 1 < bcolon:
-        ps.parseExprRange(b, int32(i + 1), int32(bcolon), br.line, br.col)  # exc type
+        # `except A, B:` lists each exception type as its own child.
+        let ecStarts = ps.splitArgs(i + 1, bcolon)
+        for ei in 0 ..< ecStarts.len:
+          let aLo = ecStarts[ei]
+          let aHi = if ei + 1 < ecStarts.len: ecStarts[ei+1] - 1 else: bcolon
+          if aLo < aHi:
+            ps.parseExprRange(b, int32(aLo), int32(aHi), br.line, br.col)
       else:
         b.addEmpty   # bare `except:` → `.`
       i = ps.emitBody(b, bcolon, refIndent, br.line, br.col)
@@ -437,8 +528,7 @@ proc parseBlock(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int 
   let colon = ps.findColon(kwIdx, hi)
   if kwIdx + 1 < colon and ps.tok(kwIdx + 1).kind == tkIdent:
     let lbl = ps.tok(kwIdx + 1)
-    b.addIdent lbl.s
-    ps.emitInfo(b, lbl.line, lbl.col, kw.line, kw.col, false)   # label rel block node
+    ps.emitName(b, lbl, kw.line, kw.col)   # block label, or `(quoted …)`
   else:
     b.addEmpty
   result = ps.emitBody(b, colon, refIndent, kw.line, kw.col)
@@ -453,8 +543,7 @@ proc parseBreakLike(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
   ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
   if kwIdx + 1 < hi and ps.tok(kwIdx + 1).kind == tkIdent:
     let lbl = ps.tok(kwIdx + 1)
-    b.addIdent lbl.s
-    ps.emitInfo(b, lbl.line, lbl.col, kw.line, kw.col, false)
+    ps.emitName(b, lbl, kw.line, kw.col)   # break/continue label, or `(quoted …)`
   else:
     b.addEmpty
   b.endTree()
@@ -502,7 +591,15 @@ proc parseSectionDef(ps: var Parser; b: var Builder; lo, hi: int; tag: string;
     b.addTree "unpackdecl"
     ps.emitInfo(b, lp.line, lp.col, pl, pc, false)          # unpackdecl = '(' pos
     if assign >= 0 and assign + 1 < hi:
-      ps.parseExprRange(b, int32(assign + 1), int32(hi), lp.line, lp.col)  # value
+      let vt = ps.tok(assign + 1)
+      # multi-line control-flow value (`let (a, b) = if c: … else: …` with the
+      # branches on later indented lines): route through the statement parser so
+      # the whole construct — including a trailing `else` — is consumed.
+      if vt.kind == tkKeyword and (vt.s == "try" or vt.s == "if" or
+         vt.s == "when" or vt.s == "case" or vt.s == "block"):
+        result = ps.parseCtrlFlowValue(b, assign + 1, lp.line, lp.col)
+      else:
+        ps.parseExprRange(b, int32(assign + 1), int32(hi), lp.line, lp.col)  # value
     else:
       b.addEmpty
     b.addTree "unpacktup"   # no line-info
@@ -510,8 +607,7 @@ proc parseSectionDef(ps: var Parser; b: var Builder; lo, hi: int; tag: string;
     for ai in 0 ..< starts.len:
       let v = ps.tok(starts[ai])
       b.addTree tag         # section tag (var/let/const)
-      b.addIdent v.s
-      ps.emitInfo(b, v.line, v.col, lp.line, lp.col, false)  # name rel '(' node
+      ps.emitName(b, v, lp.line, lp.col)   # unpack var, or `(quoted …)`
       b.addEmpty            # export
       b.addEmpty            # pragma
       b.addEmpty 2          # type, value
@@ -520,8 +616,11 @@ proc parseSectionDef(ps: var Parser; b: var Builder; lo, hi: int; tag: string;
     b.endTree()  # unpackdecl
     return
   # `name1, name2, … [{.pragma.}] [: type] [= value]`
-  let colon = ps.findColon(lo, hi)
+  var colon = ps.findColon(lo, hi)
   let assign = ps.findAssign(lo, hi)
+  # a `:` AFTER the `=` is part of the value (e.g. `= if c in {A}: x else: y`),
+  # not a type annotation — the type colon must precede the assignment.
+  if assign >= 0 and colon > assign: colon = -1
   let boundary = if colon >= 0: colon elif assign >= 0: assign else: hi
   # optional `{.pragma.}` after the name list (before `:`/`=`)
   var pragLo = -1
@@ -547,31 +646,39 @@ proc parseSectionDef(ps: var Parser; b: var Builder; lo, hi: int; tag: string;
   let nameStarts = ps.splitArgs(lo, nameEnd)
   for ni in 0 ..< nameStarts.len:
     let nTok = ps.tok(nameStarts[ni])
+    # An exported name `Name*` is an nkPostfix in the classic AST; nifler anchors
+    # the section node at the NAME NODE's info (relLineInfo(n[i], …)), which for a
+    # postfix is the `*` position — so the name then gets a negative delta back to
+    # its real column. A non-exported name anchors at the name itself. Every child
+    # (name, pragma, type, value) is emitted relative to this anchor.
+    let hasExport = nameStarts[ni] + 1 < nameEnd and
+                    ps.tok(nameStarts[ni] + 1).kind == tkOperator and
+                    ps.tok(nameStarts[ni] + 1).s == "*"
+    # Anchor precedence mirrors the classic name-node wrapping: a pragma wraps the
+    # decl in nkPragmaExpr whose info is the `{.` (identWithPragma's newNodeP),
+    # outranking the export `*`; an export alone is nkPostfix at the `*`; a plain
+    # name anchors at itself.
+    let anchor =
+      if pragLo >= 0: ps.tok(pragLo)
+      elif hasExport: ps.tok(nameStarts[ni] + 1)
+      else: nTok
     b.addTree tag
-    ps.emitInfo(b, nTok.line, nTok.col, pl, pc, false)       # section node = name pos
-    b.addIdent nTok.s
-    ps.emitInfo(b, nTok.line, nTok.col, nTok.line, nTok.col, false)  # name rel itself → none
+    ps.emitInfo(b, anchor.line, anchor.col, pl, pc, false)   # section node = name-node pos
+    ps.emitName(b, nTok, anchor.line, anchor.col)   # name atom, or `(quoted …)`
     # export marker `*`
-    if nameStarts[ni] + 1 < nameEnd and ps.tok(nameStarts[ni] + 1).kind == tkOperator and
-       ps.tok(nameStarts[ni] + 1).s == "*":
+    if hasExport:
       b.addRaw " x"
     else:
       b.addEmpty
     if pragLo >= 0:
-      discard ps.parsePragmas(b, pragLo, nTok.line, nTok.col)
+      discard ps.parsePragmas(b, pragLo, anchor.line, anchor.col)
     else:
       b.addEmpty   # pragma
     if typeLo >= 0 and typeLo < typeHi:
-      # A `proc`/`iterator`/`tuple` type annotation must go through the TYPE
-      # parser (→ `proctype`/`tuple`), not the expression parser (which would
-      # read `proc (…)` as an anonymous-proc value). Other type forms match
-      # either way, so keep the expression path for them (fewer surprises).
-      let tt = ps.tok(typeLo)
-      if tt.kind == tkKeyword and
-         (tt.s == "proc" or tt.s == "iterator" or tt.s == "tuple"):
-        parseTypeRange(ps, b, int32(typeLo), int32(typeHi), nTok.line, nTok.col)
-      else:
-        ps.parseExprRange(b, int32(typeLo), int32(typeHi), nTok.line, nTok.col)
+      # The type slot always goes through the TYPE parser (as nifler does): the
+      # expression parser mishandles modifier keywords in generic args
+      # (`seq[ref Foo]`, `sink seq[string]`) and `proc (…)` type signatures.
+      parseTypeRange(ps, b, int32(typeLo), int32(typeHi), anchor.line, anchor.col)
     else:
       b.addEmpty
     if valLo >= 0 and valLo < hi:
@@ -582,9 +689,18 @@ proc parseSectionDef(ps: var Parser; b: var Builder; lo, hi: int; tag: string;
       if nameStarts.len == 1 and vt.kind == tkKeyword and
          (vt.s == "try" or vt.s == "if" or vt.s == "when" or
           vt.s == "case" or vt.s == "block"):
-        result = ps.parseCtrlFlowValue(b, valLo, nTok.line, nTok.col)
+        result = ps.parseCtrlFlowValue(b, valLo, anchor.line, anchor.col)
+      elif nameStarts.len == 1 and vt.kind == tkIdent and
+           ps.depth0Colon(valLo, hi) > valLo:
+        # value-position postExprBlock: `let x = onRaiseQuit:` / `= build(a):`
+        # with the block body on following indented lines → `(call callee …
+        # (stmts body))`. The head must be an ident (a call/command callee) — an
+        # anonymous `proc (…): T = …` literal starts with a keyword and its `:` is
+        # a return type, not a block; a `:` inside brackets stays at depth > 0.
+        result = ps.parsePostExprBlock(b, valLo, ps.depth0Colon(valLo, hi),
+                                       anchor.line, anchor.col)
       else:
-        ps.parseExprRange(b, int32(valLo), int32(hi), nTok.line, nTok.col)     # value
+        ps.parseExprRange(b, int32(valLo), int32(hi), anchor.line, anchor.col)  # value
     else:
       b.addEmpty
     b.endTree()
@@ -598,9 +714,18 @@ proc parseSection(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
   if next.indent >= 0:
     # indented section block: each line at indent > kw.col is one ident-def
     let refIndent = kw.col
+    let memberIndent = next.indent          # column of the section's ident-defs
     var i = kwIdx + 1
     while ps.tok(i).kind != tkEof and ps.tok(i).indent > refIndent:
-      if ps.tok(i).kind == tkComment:     # doc comment in var/let/const section: dropped
+      if ps.tok(i).kind == tkComment:
+        # A comment AT the member indent is a standalone member → a sibling
+        # `(comment)` (nifler emits section members as flat siblings); a DEEPER
+        # comment is the trailing doc of the preceding def and is dropped.
+        if ps.tok(i).indent == memberIndent:
+          let ct = ps.tok(i)
+          b.addTree "comment"
+          ps.emitInfo(b, ct.line, ct.col, pl, pc, false)
+          b.endTree()
         inc i; continue
       let dhi = ps.lineEnd(i)
       let consumed = ps.parseSectionDef(b, i, dhi, tag, pl, pc)
@@ -689,28 +814,73 @@ proc parsePostExprBlock(ps: var Parser; b: var Builder; headLo, colonIdx: int;
   ## `:` block becomes a `(stmts …)` argument appended to the call/command.
   let head = ps.tok(headLo)
   let refIndent = head.col
+  # `do` block: `expr do (params) -> ret: body` → `(call <callee> (do (params …)
+  # ret (stmts body)))`. Detect a depth-0 `do` keyword introducing the block.
+  block doBlock:
+    var d = 0
+    var doIdx = -1
+    var k = headLo
+    while k < colonIdx:
+      let t = ps.tok(k)
+      if isOpenBracket(t.kind): inc d
+      elif isCloseBracket(t.kind):
+        if d > 0: dec d
+      elif d == 0 and t.kind == tkKeyword and t.s == "do":
+        doIdx = k; break
+      inc k
+    if doIdx > headLo and ps.tok(doIdx + 1).kind == tkParLe:
+      let dk = ps.tok(doIdx)
+      b.addTree "call"
+      ps.emitInfo(b, head.line, head.col, pl, pc, false)
+      # callee before `do`: `foo(x)` splits into callee+args, else a bare expr.
+      if ps.tok(doIdx - 1).kind == tkParRi:
+        let rparen = doIdx - 1
+        let lparen = ps.matchOpen(rparen)
+        ps.parseExprRange(b, int32(headLo), int32(lparen), head.line, head.col)
+        ps.parseArgList(b, int32(lparen + 1), int32(rparen), head.line, head.col)
+      else:
+        ps.parseExprRange(b, int32(headLo), int32(doIdx), head.line, head.col)
+      b.addTree "do"
+      ps.emitInfo(b, dk.line, dk.col, head.line, head.col, false)
+      discard ps.parseParams(b, doIdx + 1, dk.line, dk.col)   # (params …) + ret type
+      result = ps.emitBody(b, colonIdx, refIndent, dk.line, dk.col)
+      b.endTree()   # do
+      b.endTree()   # call
+      return
   let ce = ps.cmdCalleeEnd(headLo, colonIdx)
   if head.kind == tkIdent and ce < colonIdx and ps.startsArg(ce, colonIdx):
-    # command with space-separated args: `foo a, b: body` → `(cmd callee args… (stmts))`
+    # command with space-separated args: `foo a, b: body` → `(cmd callee args… (stmts))`.
+    # Statement-context → anchor at the callee expression's info (the `.` for a
+    # dotted callee), matching parseCommand / nifler's `newTree(nkCommand, a.info)`.
+    let anchor = ps.calleeAnchor(headLo, ce)
     b.addTree "cmd"
-    ps.emitInfo(b, head.line, head.col, pl, pc, false)
-    ps.parseExprRange(b, int32(headLo), int32(ce), head.line, head.col)   # callee
-    ps.parseArgList(b, int32(ce), int32(colonIdx), head.line, head.col)
-    result = ps.emitBody(b, colonIdx, refIndent, head.line, head.col)     # (stmts body) arg
+    ps.emitInfo(b, anchor.line, anchor.col, pl, pc, false)
+    ps.parseExprRange(b, int32(headLo), int32(ce), anchor.line, anchor.col)   # callee
+    ps.parseArgList(b, int32(ce), int32(colonIdx), anchor.line, anchor.col)
+    result = ps.emitBody(b, colonIdx, refIndent, anchor.line, anchor.col)     # (stmts body) arg
     b.endTree()
   else:
     # call form: `foo: body` / `c.into: body` / `foo(args): body`
     # → `(call <callee> [args…] (stmts body))`.
     b.addTree "call"
-    ps.emitInfo(b, head.line, head.col, pl, pc, false)
     if colonIdx - 1 >= headLo and ps.tok(colonIdx - 1).kind == tkParRi:
+      # parenthesized call `foo(args): body` — nkCall from primarySuffix anchors
+      # at the `(` (the open paren), so the callee gets a negative delta back.
       let rparen = colonIdx - 1
       let lparen = ps.matchOpen(rparen)
-      ps.parseExprRange(b, int32(headLo), int32(lparen), head.line, head.col)     # callee
-      ps.parseArgList(b, int32(lparen + 1), int32(rparen), head.line, head.col)   # args
+      let lp = ps.tok(lparen)
+      ps.emitInfo(b, lp.line, lp.col, pl, pc, false)
+      ps.parseExprRange(b, int32(headLo), int32(lparen), lp.line, lp.col)     # callee
+      ps.parseArgList(b, int32(lparen + 1), int32(rparen), lp.line, lp.col)   # args
+      result = ps.emitBody(b, colonIdx, refIndent, lp.line, lp.col)     # (stmts body) arg
     else:
-      ps.parseExprRange(b, int32(headLo), int32(colonIdx), head.line, head.col)   # bare callee
-    result = ps.emitBody(b, colonIdx, refIndent, head.line, head.col)     # (stmts body) arg
+      # bare callee `foo: body` / `c.into: body` — postExprBlocks wraps the callee,
+      # so the call anchors at the callee expression's info (the `.` for a dotted
+      # callee), matching parseCommand's calleeAnchor rule.
+      let anchor = ps.calleeAnchor(headLo, colonIdx)
+      ps.emitInfo(b, anchor.line, anchor.col, pl, pc, false)
+      ps.parseExprRange(b, int32(headLo), int32(colonIdx), anchor.line, anchor.col)  # bare callee
+      result = ps.emitBody(b, colonIdx, refIndent, anchor.line, anchor.col)  # (stmts body) arg
     b.endTree()
 
 proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
@@ -744,6 +914,8 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
     of "import": return ps.parseImportLike(b, startIdx, pl, pc, "import")
     of "include": return ps.parseImportLike(b, startIdx, pl, pc, "include")
     of "export": return ps.parseImportLike(b, startIdx, pl, pc, "export")
+    of "mixin": return ps.parseImportLike(b, startIdx, pl, pc, "mixin")
+    of "bind": return ps.parseImportLike(b, startIdx, pl, pc, "bind")
     of "from": return ps.parseFromImport(b, startIdx, pl, pc)
     of "static": return ps.parseStatic(b, startIdx, pl, pc)
     of "if": return ps.parseIfLike(b, startIdx, pl, pc, "if")
@@ -772,7 +944,9 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
     # against an assignment RHS (`x = …`).
     if pcolon > startIdx and ps.findAssign(startIdx, pcolon) < 0:
       # exclude a colon owned by an unparenthesized if/when/case EXPRESSION in
-      # the head (`x = if c: a`, `echo if c: a else: b`) — that is not a block.
+      # the head (`x = if c: a`, `echo if c: a else: b`), or by an anonymous
+      # routine's return type (`xs.sort proc (a): int = …` — the `: int` is the
+      # proc return, not a block) — neither is a postExprBlock.
       var cf = false
       var d = 0
       var k = startIdx
@@ -783,11 +957,20 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
           if d > 0: dec d
         elif d == 0 and t.kind == tkKeyword and
              (t.s == "if" or t.s == "when" or t.s == "case" or
-              t.s == "elif" or t.s == "else" or t.s == "of"):
+              t.s == "elif" or t.s == "else" or t.s == "of" or
+              t.s == "proc" or t.s == "func" or t.s == "iterator"):
           cf = true; break
         inc k
       if not cf:
         return ps.parsePostExprBlock(b, startIdx, pcolon, pl, pc)
+    # Fallback: the first depth-0 `:` belonged to an if/case/proc in the args, but
+    # the head LINE still ends with a real block colon —
+    # `addUIntTypedOp dest, if k: A else: B, 8, info:` with the body on the next
+    # lines. A trailing depth-0 `:` at end of line is that block introducer.
+    let eol = lineHi - 1
+    if eol > startIdx and ps.tok(eol).kind == tkColon and eol > pcolon and
+       ps.findAssign(startIdx, eol) < 0:
+      return ps.parsePostExprBlock(b, startIdx, eol, pl, pc)
   # expression / command / assignment statement (bounded by the logical line,
   # any tighter `hiLimit`, and the next `;`)
   var bound = ps.lineEnd(startIdx)
@@ -796,7 +979,7 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
   let consumed = ps.parseExprStmt(b, int32(startIdx), int32(hi), pl, pc)
   result = if consumed > hi: consumed else: hi
 
-proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
+proc parseStmtImpl(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
                hiLimit: int): int =
   ## Parse a run of `;`-separated statements on the same logical line (each an
   ## `(stmts …)` sibling), bounded by `hiLimit` (a branch/brace body) or the
@@ -807,3 +990,11 @@ proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
   while ps.tok(i).kind == tkSemicolon and i + 1 < bound:
     i = ps.parseOneStmt(b, i + 1, pl, pc, hiLimit)
   result = i
+
+proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
+               hiLimit: int): int =
+  ## Depth-guarding wrapper (see `enterDepth`): counts recursion nesting for
+  ## `--max-depth`, then delegates. Off-by-default: inert when maxDepth == 0.
+  ps.enterDepth(ps.tok(startIdx).line)
+  result = ps.parseStmtImpl(b, startIdx, pl, pc, hiLimit)
+  dec ps.depth
