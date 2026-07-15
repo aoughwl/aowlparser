@@ -29,8 +29,19 @@ include parse_stmt
 
 proc parseModule*(ps: var Parser; b: var Builder) =
   b.addHeader "nifparser", "nim-parsed"
+  # The module `stmts` node anchors at the FIRST token — nifler's
+  # `newNodeP(nkStmtList, p)` takes the current token at parseAll start. A leading
+  # `##` doc comment IS that token (our lexer tokenises it and emits `(comment)`,
+  # so the anchor stays on line 1); regular `#` comments are never tokenised, so
+  # the anchor lands on the first real statement (e.g. line 3 after a header
+  # comment + blank). All child line-info is relative to this, so getting the
+  # anchor right removes the delta cascade that otherwise breaks every file whose
+  # first statement is not on line 1.
+  let first = ps.tok(0)
+  let sl = if first.kind == tkEof: 1'i32 else: first.line
+  let sc = if first.kind == tkEof: 0'i32 else: first.col
   b.addTree "stmts"
-  ps.emitInfo(b, 1, 0, 0, 0, true)   # module stmts: absolute (col 0, line 1, file)
+  ps.emitInfo(b, sl, sc, 0, 0, true)   # module stmts: absolute (first-token pos, file)
   var i = 0
   while ps.tok(i).kind != tkEof:
     let t = ps.tok(i)
@@ -38,9 +49,9 @@ proc parseModule*(ps: var Parser; b: var Builder) =
       # Top-level `type` sections route to parse_type.nim. (Nested type
       # sections in routine bodies re-enter via parseStmt, whose `type`
       # dispatch is owned by parse_stmt.nim.)
-      i = ps.parseTypeSection(b, i, 1, 0)
+      i = ps.parseTypeSection(b, i, sl, sc)
     else:
-      i = ps.parseStmt(b, i, 1, 0, -1)
+      i = ps.parseStmt(b, i, sl, sc, -1)
     # A trailing `##` doc comment (indented deeper than the top level) documents
     # the statement just parsed — nifler attaches it, so drop it here.
     i = ps.skipTrailingDoc(i, 0)

@@ -21,7 +21,7 @@ for arg in "$@"; do
   fi
 done
 
-total=0; oraclefail=0; ourfail=0; mismatch=0; pass=0
+total=0; oraclefail=0; ourfail=0; mismatch=0; pass=0; exact=0
 mfiles=""; ofiles=""
 for nim in "${inputs[@]}"; do
   total=$((total+1))
@@ -35,9 +35,14 @@ for nim in "${inputs[@]}"; do
   python3 "$CANON" "$our" > "$WORK/o.canon"
   if diff -q "$WORK/r.canon" "$WORK/o.canon" >/dev/null; then
     pass=$((pass+1))
+    # Byte-exact bonus: identical `.p.nif` modulo the one intentional `(.vendor)`
+    # header line (see diff.sh). Only meaningful among structurally-passing files.
+    sed 's/^(\.vendor "[^"]*")/(.vendor "<v>")/' "$ref" > "$WORK/r.exact"
+    sed 's/^(\.vendor "[^"]*")/(.vendor "<v>")/' "$our" > "$WORK/o.exact"
+    cmp -s "$WORK/r.exact" "$WORK/o.exact" && exact=$((exact+1))
   else
     mismatch=$((mismatch+1)); mfiles="$mfiles $nim"
   fi
 done
-echo "stress: total=$total  pass=$pass  mismatch=$mismatch  our-crash=$ourfail  oracle-skip=$oraclefail"
+echo "stress: total=$total  pass=$pass  mismatch=$mismatch  our-crash=$ourfail  oracle-skip=$oraclefail  byte-exact=$exact"
 [ -n "$mfiles" ] && { echo "MISMATCH/CRASH files:"; for f in $mfiles; do echo "  $f"; done; }

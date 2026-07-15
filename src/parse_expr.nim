@@ -53,6 +53,17 @@ proc findPostfix(ps: Parser; lo, hi: int; kind: var int): int =
       if depth > 0: dec depth
     inc i
 
+proc calleeAnchor(ps: Parser; lo, hi: int): Token =
+  ## The position at which the callee sub-expression `[lo, hi)` is emitted — the
+  ## line-info of the node `parsePrimaryRange` will build for it. That is its
+  ## OUTERMOST postfix operator (`.`/`[`/`{`/`(`, e.g. the `.` of `a.b.c`), or the
+  ## head atom when the callee is a bare primary. Used to anchor a STATEMENT-level
+  ## command at its callee's info (nifler's `newTree(nkCommand, a.info, a)`), which
+  ## for a dotted callee is the dot, not the head ident.
+  var pk = 0
+  let k = ps.findPostfix(lo, hi, pk)
+  result = if k >= 0: ps.tok(k) else: ps.tok(lo)
+
 proc parseArg(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   ## One comma-delimited element: `k: v` -> `(kv k v)`, `k = v` -> `(vv k v)`,
   ## else a plain expression. Keyword-led args whose own syntax owns a depth-0
@@ -255,13 +266,18 @@ proc parseCastExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   b.endTree()
 
 proc parseCmdKw(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
-  ## Keyword-led command in expr position, e.g. `addr x` -> `(cmd addr x)`.
+  ## Keyword-led command in EXPR position, e.g. `let p = addr x` -> `(cmd addr x)`.
+  ## Expr-context, so the node anchors at the FIRST ARGUMENT (nifler's
+  ## `commandExpr`); the keyword callee then gets a negative delta back to it.
+  ## (A keyword command that is a whole STATEMENT anchors at the callee instead —
+  ## parse_stmt routes those through `parseCommand`.)
   let kw = ps.tok(int(lo))
+  let arg0 = ps.tok(int(lo) + 1)
   b.addTree "cmd"
-  ps.emitInfo(b, kw.line, kw.col, pl, pc, false)   # cmd node = keyword pos
+  ps.emitInfo(b, arg0.line, arg0.col, pl, pc, false)   # cmd node = first-arg pos
   b.addIdent kw.s
-  ps.emitInfo(b, kw.line, kw.col, kw.line, kw.col, false)
-  ps.parseArgList(b, lo + 1, hi, kw.line, kw.col)
+  ps.emitInfo(b, kw.line, kw.col, arg0.line, arg0.col, false)
+  ps.parseArgList(b, lo + 1, hi, arg0.line, arg0.col)
   b.endTree()
 
 proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
@@ -609,11 +625,15 @@ proc parseExprRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   block cmdLead:
     let ce = ps.cmdCalleeEnd(int(lo), int(hi))
     if head.kind == tkIdent and ce < int(hi) and ps.startsArg(ce, int(hi)):
-      let callee = ps.tok(int(lo))
+      # EXPRESSION-context command (`commandExpr`): nkCommand.info = the FIRST
+      # ARGUMENT's position (the cursor when the node is built), so the callee
+      # gets a negative delta back to it. (Statement-context commands anchor at
+      # the callee instead — see parse_stmt's parseCommand.)
+      let arg0 = ps.tok(ce)
       b.addTree "cmd"
-      ps.emitInfo(b, callee.line, callee.col, pl, pc, false)
-      ps.parseExprRange(b, lo, int32(ce), callee.line, callee.col)
-      ps.parseArgList(b, int32(ce), hi, callee.line, callee.col)
+      ps.emitInfo(b, arg0.line, arg0.col, pl, pc, false)
+      ps.parseExprRange(b, lo, int32(ce), arg0.line, arg0.col)
+      ps.parseArgList(b, int32(ce), hi, arg0.line, arg0.col)
       b.endTree()
       return
   let split = ps.findSplit(int(lo), int(hi))

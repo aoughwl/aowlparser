@@ -77,6 +77,9 @@ proc usage() =
   write stderr, "  --stdin            read source from stdin (also: input arg `-`)\n"
   write stderr, "  --stdout           write NIF to stdout (also: output arg `-`)\n"
   write stderr, "  --filename:PATH    line-info path to record for stdin (default `stdin`)\n"
+  write stderr, "  --portable-paths:on|off\n"
+  write stderr, "                       record the source path relative to cwd with '/'\n"
+  write stderr, "                       separators (default on; matches nifler)\n"
   quit 1
 
 proc hasPrefix(s, pre: string): bool =
@@ -119,6 +122,7 @@ proc main() =
   var useStdin = false
   var useStdout = false
   var filenameOverride = ""
+  var portablePaths = true   # nifler default: relativize the source path to cwd
   let cli = commandLineParams()
   for ci in 0 ..< cli.len:
     let a = cli[ci]
@@ -192,6 +196,13 @@ proc main() =
       if maxDepth < 0: maxDepth = 0
     elif hasPrefix(a, "--filename:"):
       filenameOverride = afterColon(a)
+    elif hasPrefix(a, "--portable-paths:"):
+      case afterColon(a)
+      of "on": portablePaths = true
+      of "off": portablePaths = false
+      else:
+        write stderr, "unknown --portable-paths mode: " & afterColon(a) & "\n"
+        usage()
     else:
       params.add a
   if params.len < 1:
@@ -225,12 +236,20 @@ proc main() =
     except:
       write stderr, "cannot read file: " & inputArg & "\n"
       quit 1
-  # `fileField` is the path written into NIF line-info suffixes. nifler uses the
-  # cwd-relative path; pass the input arg through verbatim for files. For stdin
-  # use `--filename:` if given, else the placeholder `stdin`.
+  # `fileField` is the path written into NIF line-info suffixes. nifler's default
+  # (portablePaths=true) records the source path RELATIVE to the current working
+  # directory with '/' separators — so the output is byte-identical regardless of
+  # whether the caller passed a relative or absolute path. We mirror that exactly
+  # (relativePath(absolutePath(input), cwd, '/')); `--portable-paths:off` keeps the
+  # path verbatim. For stdin use `--filename:` if given, else the placeholder.
   var fileField = inputArg
   if useStdin:
     fileField = if filenameOverride.len > 0: filenameOverride else: "stdin"
+  elif portablePaths:
+    try:
+      fileField = relativePath(absolutePath(inputArg), getCurrentDir(), '/')
+    except:
+      discard   # unresolvable path → keep the arg verbatim
   # Resolve the output target.
   var outp = ""
   if not useStdout:

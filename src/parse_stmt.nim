@@ -16,12 +16,16 @@
 ## threshold on `ps.tok(i).indent` (see `emitBody`).
 
 proc parseCommand(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
-  let callee = ps.tok(int(lo))
+  # STATEMENT-context command (`parseExprStmt` → `newTree(nkCommand, a.info, a)`):
+  # nkCommand.info = the CALLEE expression's info. For a dotted callee `a.b` that
+  # is the `.` position, not the head ident — so anchor at the callee's emitted
+  # node, not `tok(lo)`. (Expr-context commands anchor at the first arg instead.)
   let ce = ps.cmdCalleeEnd(int(lo), int(hi))   # end of the callee primary
+  let anchor = ps.calleeAnchor(int(lo), ce)
   b.addTree "cmd"
-  ps.emitInfo(b, callee.line, callee.col, pl, pc, false)   # cmd node info = callee pos
-  ps.parseExprRange(b, lo, int32(ce), callee.line, callee.col)   # callee (may be dotted)
-  ps.parseArgList(b, int32(ce), hi, callee.line, callee.col)
+  ps.emitInfo(b, anchor.line, anchor.col, pl, pc, false)   # cmd node info = callee pos
+  ps.parseExprRange(b, lo, int32(ce), anchor.line, anchor.col)   # callee (may be dotted)
+  ps.parseArgList(b, int32(ce), hi, anchor.line, anchor.col)
   b.endTree()
 
 proc parseExprStmt(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32): int =
@@ -34,10 +38,14 @@ proc parseExprStmt(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32): int =
   # so a named-arg `=` in a command (`f a, k = v`) is not read as an `asgn`.
   let head = ps.tok(int(lo))
   let ce = ps.cmdCalleeEnd(int(lo), int(hi))   # end of callee primary
-  let isCmd =
-    (head.kind == tkIdent) and
-    ce < int(hi) and
-    ps.startsArg(ce, int(hi))
+  # A command callee is a bare ident, or the `addr` keyword in its space form
+  # (`addr x`; `addr(x)` is a call, and cmdCalleeEnd already folds the adjacent
+  # paren into the callee so `ce == hi` there). Routing a keyword command through
+  # parseCommand — not parseCmdKw — gives it the STATEMENT-context callee anchor
+  # (nifler's `newTree(nkCommand, a.info)`), not the expr-context first-arg anchor.
+  let calleeOk = head.kind == tkIdent or
+                 (head.kind == tkKeyword and head.s == "addr")
+  let isCmd = calleeOk and ce < int(hi) and ps.startsArg(ce, int(hi))
   if isCmd:
     ps.parseCommand(b, lo, hi, pl, pc)
     return
@@ -826,12 +834,15 @@ proc parsePostExprBlock(ps: var Parser; b: var Builder; headLo, colonIdx: int;
       return
   let ce = ps.cmdCalleeEnd(headLo, colonIdx)
   if head.kind == tkIdent and ce < colonIdx and ps.startsArg(ce, colonIdx):
-    # command with space-separated args: `foo a, b: body` → `(cmd callee args… (stmts))`
+    # command with space-separated args: `foo a, b: body` → `(cmd callee args… (stmts))`.
+    # Statement-context → anchor at the callee expression's info (the `.` for a
+    # dotted callee), matching parseCommand / nifler's `newTree(nkCommand, a.info)`.
+    let anchor = ps.calleeAnchor(headLo, ce)
     b.addTree "cmd"
-    ps.emitInfo(b, head.line, head.col, pl, pc, false)
-    ps.parseExprRange(b, int32(headLo), int32(ce), head.line, head.col)   # callee
-    ps.parseArgList(b, int32(ce), int32(colonIdx), head.line, head.col)
-    result = ps.emitBody(b, colonIdx, refIndent, head.line, head.col)     # (stmts body) arg
+    ps.emitInfo(b, anchor.line, anchor.col, pl, pc, false)
+    ps.parseExprRange(b, int32(headLo), int32(ce), anchor.line, anchor.col)   # callee
+    ps.parseArgList(b, int32(ce), int32(colonIdx), anchor.line, anchor.col)
+    result = ps.emitBody(b, colonIdx, refIndent, anchor.line, anchor.col)     # (stmts body) arg
     b.endTree()
   else:
     # call form: `foo: body` / `c.into: body` / `foo(args): body`
