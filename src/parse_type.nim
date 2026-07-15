@@ -257,7 +257,10 @@ proc parseTupleInline(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       if i < rb and (ps.tok(i).kind == tkComma or ps.tok(i).kind == tkSemicolon): inc i
       for nm in names:
         b.addTree "kv"
-        ps.emitInfo(b, nm.line, nm.col, kw.line, kw.col, false)
+        # nifler emits each tuple field relative to the tuple's PARENT
+        # (relLineInfo(def[j], parent) — not the tuple node), so the kv's parent
+        # anchor is (pl, pc), the position passed in for the tuple itself.
+        ps.emitInfo(b, nm.line, nm.col, pl, pc, false)
         b.addIdent nm.s
         ps.emitInfo(b, nm.line, nm.col, nm.line, nm.col, false)
         if tLo >= 0:

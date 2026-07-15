@@ -856,15 +856,24 @@ proc parsePostExprBlock(ps: var Parser; b: var Builder; headLo, colonIdx: int;
     # call form: `foo: body` / `c.into: body` / `foo(args): body`
     # → `(call <callee> [args…] (stmts body))`.
     b.addTree "call"
-    ps.emitInfo(b, head.line, head.col, pl, pc, false)
     if colonIdx - 1 >= headLo and ps.tok(colonIdx - 1).kind == tkParRi:
+      # parenthesized call `foo(args): body` — nkCall from primarySuffix anchors
+      # at the `(` (the open paren), so the callee gets a negative delta back.
       let rparen = colonIdx - 1
       let lparen = ps.matchOpen(rparen)
-      ps.parseExprRange(b, int32(headLo), int32(lparen), head.line, head.col)     # callee
-      ps.parseArgList(b, int32(lparen + 1), int32(rparen), head.line, head.col)   # args
+      let lp = ps.tok(lparen)
+      ps.emitInfo(b, lp.line, lp.col, pl, pc, false)
+      ps.parseExprRange(b, int32(headLo), int32(lparen), lp.line, lp.col)     # callee
+      ps.parseArgList(b, int32(lparen + 1), int32(rparen), lp.line, lp.col)   # args
+      result = ps.emitBody(b, colonIdx, refIndent, lp.line, lp.col)     # (stmts body) arg
     else:
-      ps.parseExprRange(b, int32(headLo), int32(colonIdx), head.line, head.col)   # bare callee
-    result = ps.emitBody(b, colonIdx, refIndent, head.line, head.col)     # (stmts body) arg
+      # bare callee `foo: body` / `c.into: body` — postExprBlocks wraps the callee,
+      # so the call anchors at the callee expression's info (the `.` for a dotted
+      # callee), matching parseCommand's calleeAnchor rule.
+      let anchor = ps.calleeAnchor(headLo, colonIdx)
+      ps.emitInfo(b, anchor.line, anchor.col, pl, pc, false)
+      ps.parseExprRange(b, int32(headLo), int32(colonIdx), anchor.line, anchor.col)  # bare callee
+      result = ps.emitBody(b, colonIdx, refIndent, anchor.line, anchor.col)  # (stmts body) arg
     b.endTree()
 
 proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
