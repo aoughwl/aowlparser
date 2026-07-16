@@ -1,9 +1,9 @@
-## aifparser — a nimony-native Nim-source parser that emits the SAME AIF as the
+## aowlparser — a nimony-native Nim-source parser that emits the SAME AIF as the
 ## classic `nifler`, so it can be compiled to JS (via nim_js) and run in the
 ## browser where classic-Nim `nifler` cannot.
 ##
 ## CLI (mirrors nifler):
-##   aifparser p <in.nim> [out.p.aif]     parse a Nim file, produce a AIF file
+##   aowlparser p <in.nim> [out.p.aif]     parse a Nim file, produce a AIF file
 ##
 ## When the output path is omitted it defaults to `<in>.p.aif`.
 ##
@@ -146,11 +146,11 @@ proc runParse(src, outp, fileField: string; toStdout, strict, curly: bool;
     for d in diags:
       if d.severity == sevError: inc nErr
     if nErr > 0:
-      write stderr, "aifparser: " & $nErr & " error(s) in input [--strict]\n"
+      write stderr, "aowlparser: " & $nErr & " error(s) in input [--strict]\n"
       quit 1
 
 proc runCheck(src, fileField: string; opts: LexOptions; diagFmt: DiagFormat): int =
-  ## Lint-only mode (`aifparser check`): emit diagnostics to STDOUT (text or json,
+  ## Lint-only mode (`aowlparser check`): emit diagnostics to STDOUT (text or json,
   ## default text) and no AIF. Returns the process exit code — 1 if any error-level
   ## diagnostic was found, else 0. This is the "better errors than nifler" surface:
   ## recoverable, multi-error, machine-readable, and it never aborts on the first.
@@ -162,9 +162,9 @@ proc runCheck(src, fileField: string; opts: LexOptions; diagFmt: DiagFormat): in
   return 0
 
 proc usage() =
-  write stderr, "aifparser — Nim source -> AIF (nifler-compatible)\n"
-  write stderr, "usage: aifparser [OPTIONS] p <in.nim> [out.p.aif]\n"
-  write stderr, "       aifparser [OPTIONS] check <in.nim>   # lint only: diagnostics, no AIF\n"
+  write stderr, "aowlparser — Nim source -> AIF (nifler-compatible)\n"
+  write stderr, "usage: aowlparser [OPTIONS] p <in.nim> [out.p.aif]\n"
+  write stderr, "       aowlparser [OPTIONS] check <in.nim>   # lint only: diagnostics, no AIF\n"
   write stderr, "  --curly            experimental: also accept `{ … }` block bodies\n"
   write stderr, "  --tabs:MODE        indentation whitespace policy (default spaces):\n"
   write stderr, "                       spaces  spaces only (classic-Nim stance)\n"

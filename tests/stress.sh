@@ -4,7 +4,7 @@
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NIFLER="${NIFLER:-/home/savant/nimony/bin/nifler}"
-NIFPARSER="${NIFPARSER:-$ROOT/bin/aifparser}"
+NIFPARSER="${NIFPARSER:-$ROOT/bin/aowlparser}"
 CANON="$ROOT/tests/canon.py"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

@@ -8,7 +8,7 @@
 # silent with exit 0.
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NP="${NIFPARSER:-$ROOT/bin/aifparser}"
+NP="${NIFPARSER:-$ROOT/bin/aowlparser}"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 fail=0
 

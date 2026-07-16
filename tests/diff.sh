@@ -15,7 +15,7 @@
 #
 # Env overrides:
 #   NIFLER      path to native nifler   (default /home/savant/nimony/bin/nifler)
-#   NIFPARSER   path to aifparser       (default bin/aifparser)
+#   NIFPARSER   path to aifparser       (default bin/aowlparser)
 #
 # Dependency-light: bash + coreutils + python3.
 
@@ -25,7 +25,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 
 NIFLER="${NIFLER:-/home/savant/nimony/bin/nifler}"
-NIFPARSER="${NIFPARSER:-$ROOT/bin/aifparser}"
+NIFPARSER="${NIFPARSER:-$ROOT/bin/aowlparser}"
 CANON="$HERE/canon.py"
 CORPUS="$HERE/corpus"
 WORK="$HERE/_work"
@@ -35,7 +35,7 @@ if [ ! -x "$NIFLER" ]; then
   exit 2
 fi
 if [ ! -x "$NIFPARSER" ]; then
-  echo "ERROR: aifparser binary not found: $NIFPARSER" >&2
+  echo "ERROR: aowlparser binary not found: $NIFPARSER" >&2
   echo "  Build it first (see README.md 'Build')." >&2
   exit 2
 fi
@@ -63,7 +63,7 @@ for nim in *.nim; do
     fail=$((fail+1)); fails="$fails $base"; continue
   fi
   if [ ! -s "$our" ]; then
-    printf '  %-18s FAIL (aifparser produced no output)\n' "$base"
+    printf '  %-18s FAIL (aowlparser produced no output)\n' "$base"
     fail=$((fail+1)); fails="$fails $base"; continue
   fi
 
