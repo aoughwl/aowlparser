@@ -183,10 +183,13 @@ proc parseTypeRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   # `seq[string]` (adjacent `[`) keeps the bracket in the callee (ce == hi).
   block:
     let ce = ps.cmdCalleeEnd(int(lo), int(hi))
-    # callee is a bare ident (`sink T`) or the `nil` keyword (`nil pointer`, a
-    # typed-nil command — nifler: `(cmd (nil) pointer)`).
-    let cmdCalleeOk = ps.tok(int(lo)).kind == tkIdent or
-                      (ps.tok(int(lo)).kind == tkKeyword and ps.tok(int(lo)).s == "nil")
+    # callee is a bare ident (`sink T`, `lent T` — these are non-keyword idents),
+    # or one of the keyword type modifiers `static T` / `type T` (`(cmd static
+    # bool)`), or the `nil` keyword (`nil pointer` = `(cmd (nil) pointer)`).
+    let c0 = ps.tok(int(lo))
+    let cmdCalleeOk = c0.kind == tkIdent or
+                      (c0.kind == tkKeyword and
+                       (c0.s == "nil" or c0.s == "static" or c0.s == "type"))
     if cmdCalleeOk and ce < int(hi) and ps.startsArg(ce, int(hi)):
       # A command in TYPE position (`lent T`, `sink seq[int]`) is an
       # expression-context command: nkCommand.info = the FIRST ARGUMENT, so the
