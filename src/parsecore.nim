@@ -309,6 +309,11 @@ proc findSplit(ps: Parser; lo, hi: int; typeCtx = false): int =
          # operand. Guarding on the previous token keeps the `|` chain splitting on
          # `|` (precedence 8) instead of on the `ptr` (precedence 3).
          not isBinaryOp(ps.tok(i - 1)) and
+         # A left neighbour `:` means `ptr`/`ref` opens the TYPE after a return or
+         # field colon (`proc (): ptr T {.cdecl.}`, `x: ref Y`), so it is a prefix
+         # modifier of that type, not an infix — otherwise the whole proc type
+         # mis-splits into `(infix ptr (proctype …) …)`.
+         ps.tok(i - 1).kind != tkColon and
          # A left neighbour that is a PREFIX type modifier (`var ref T`, `sink ptr
          # X`, `lent ref Y`) makes `ref`/`ptr` that modifier's operand, not an
          # infix — otherwise `var ref T` mis-splits into `(infix ref (mut) T)`.
