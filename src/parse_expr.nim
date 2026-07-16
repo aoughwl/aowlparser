@@ -152,6 +152,7 @@ proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32;
     let isElse = kw.kind == tkKeyword and kw.s == "else"
     # find the branch body colon (depth 0) and the next branch keyword.
     var depth = 0
+    var ifDepth = 0            # nesting of inline `if`/`when`/`case` in the body
     var colon = -1
     var nxt = int(hi)
     var j = i + 1
@@ -162,8 +163,14 @@ proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32;
         if depth > 0: dec depth
       elif depth == 0 and t.kind == tkColon and colon < 0:
         colon = j
+      elif depth == 0 and t.kind == tkKeyword and
+           (t.s == "if" or t.s == "when" or t.s == "case"):
+        inc ifDepth           # nested inline expr: its `elif`/`else` are not ours
       elif depth == 0 and t.kind == tkKeyword and (t.s == "elif" or t.s == "else"):
-        nxt = j; break
+        if ifDepth > 0:
+          if t.s == "else": dec ifDepth   # closes the innermost nested construct
+        else:
+          nxt = j; break
       inc j
     let bodyLo = colon + 1
     if isElse:
