@@ -132,6 +132,22 @@ proc parseTypeRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   # (e.g. `nil (ptr)` = `(cmd (nil) (par (ptr)))`).
   if first.kind == tkParLe and ps.matchClose(int(lo)) == int(hi) - 1:
     let rb = int(hi) - 1
+    # A control-flow EXPRESSION as the paren body — `(when C: T1 else: T2)` in a
+    # type RHS — is `(par (when …))`, not a tuple: the branch colons are the
+    # when/if/case syntax, not `field: T` separators. Parse it via the expression
+    # forms (spliced before this file), with bare branch bodies like nifler.
+    let inner = ps.tok(int(lo) + 1)
+    if inner.kind == tkKeyword and
+       (inner.s == "when" or inner.s == "if" or inner.s == "case" or inner.s == "try"):
+      b.addTree "par"
+      ps.emitInfo(b, first.line, first.col, pl, pc, false)
+      case inner.s
+      of "when": ps.parseIfExpr(b, int32(int(lo) + 1), int32(rb), first.line, first.col, false, "when")
+      of "if": ps.parseIfExpr(b, int32(int(lo) + 1), int32(rb), first.line, first.col, false, "if")
+      of "case": ps.parseCaseExpr(b, int32(int(lo) + 1), int32(rb), first.line, first.col)
+      else: ps.parseTryExpr(b, int32(int(lo) + 1), int32(rb), first.line, first.col)
+      b.endTree()
+      return
     let elems0 = ps.splitArgs(int(lo) + 1, rb)
     if elems0.len == 1 and elems0[0] < rb and ps.depth0Colon(elems0[0], rb) < 0:
       b.addTree "par"
