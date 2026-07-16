@@ -642,8 +642,12 @@ proc parseObjectWhen(ps: var Parser; b: var Builder; whenIdx, defIndent: int;
   ps.emitInfo(b, kw.line, kw.col, kl, kc, false)
   var i = whenIdx
   let refIndent = kw.col
+  # Only the FIRST branch is `when`; after that, a `when` at the same indent is a
+  # SEPARATE conditional-field group (an object body can hold several), NOT a
+  # branch of this one — accepting it here would absorb the sibling `when`/`else`.
   while ps.tok(i).kind == tkKeyword and ps.tok(i).indent >= int32(refIndent) and
-        (ps.tok(i).s == "when" or ps.tok(i).s == "elif" or ps.tok(i).s == "else"):
+        ((i == whenIdx and ps.tok(i).s == "when") or
+         ps.tok(i).s == "elif" or ps.tok(i).s == "else"):
     let br = ps.tok(i)
     let bhi = ps.lineEnd(i)
     let bcolon = ps.findColon(i, bhi)
