@@ -384,10 +384,14 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
   if t.kind == tkKeyword:
     case t.s
     of "nil":
-      b.addTree "nil"
-      ps.emitInfo(b, t.line, t.col, pl, pc, false)
-      b.endTree()
-      return
+      # bare `nil` → `(nil)`; but `nil.cstring` (a postfix on nil) must chain, so
+      # only emit-and-return when nil is the whole range — else fall through to
+      # the postfix chain below, which recurses to `(nil)` as its head.
+      if int(lo) + 1 == int(hi):
+        b.addTree "nil"
+        ps.emitInfo(b, t.line, t.col, pl, pc, false)
+        b.endTree()
+        return
     of "not":
       b.addTree "prefix"
       ps.emitInfo(b, t.line, t.col, pl, pc, false)

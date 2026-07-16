@@ -562,9 +562,17 @@ proc parseObjectCase(ps: var Parser; b: var Builder; caseIdx, defIndent: int;
   let kw = ps.tok(caseIdx)
   b.addTree "case"
   ps.emitInfo(b, kw.line, kw.col, kl, kc, false)
-  # discriminator field on the case line: `case name: Type`
+  # discriminator field on the case line: `case name: Type`. A discriminator-LESS
+  # `case` (nimony's enum variant: bare `case` then `of`) still gets a field node
+  # with a synthesized `???` name and all-empty slots, matching nifler.
   let caseHi = ps.lineEnd(caseIdx)
-  ps.emitFieldLine(b, caseIdx + 1, caseHi, kw.line, kw.col)
+  if caseIdx + 1 < caseHi:
+    ps.emitFieldLine(b, caseIdx + 1, caseHi, kw.line, kw.col)
+  else:
+    b.addTree "fld"
+    ps.emitInfo(b, kw.line, kw.col, kw.line, kw.col, false)
+    b.addEmpty; b.addEmpty; b.addEmpty; b.addEmpty; b.addEmpty
+    b.endTree()
   var i = caseHi
   let refIndent = kw.col
   while ps.tok(i).kind != tkEof and ps.tok(i).indent >= int32(refIndent) and
