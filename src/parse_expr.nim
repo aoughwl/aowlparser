@@ -668,7 +668,15 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
       ps.parseArgList(b, int32(int(lo) + 1), int32(rpIdx), t.line, t.col)
     b.endTree()
   of tkIdent, tkKeyword:
-    ps.emitName(b, t, pl, pc)
+    # A bare type keyword standing alone as a primary (`T is object`, `x is tuple`)
+    # is an empty type node `(object)`/`(tuple)`, not a name atom.
+    if t.kind == tkKeyword and
+       (t.s == "object" or t.s == "tuple" or t.s == "enum" or t.s == "concept"):
+      b.addTree t.s
+      ps.emitInfo(b, t.line, t.col, pl, pc, false)
+      b.endTree()
+    else:
+      ps.emitName(b, t, pl, pc)
   else:
     b.addEmpty
 

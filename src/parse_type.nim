@@ -324,8 +324,7 @@ proc parseTupleInline(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
         # (relLineInfo(def[j], parent) — not the tuple node), so the kv's parent
         # anchor is (pl, pc), the position passed in for the tuple itself.
         ps.emitInfo(b, nm.line, nm.col, pl, pc, false)
-        b.addIdent nm.s
-        ps.emitInfo(b, nm.line, nm.col, nm.line, nm.col, false)
+        ps.emitName(b, nm, nm.line, nm.col)   # field name, or `(quoted <kw>)`
         if tLo >= 0:
           parseTypeRange(ps, b, int32(tLo), int32(tHi), nm.line, nm.col)
         else:
@@ -546,7 +545,10 @@ proc emitFieldLine(ps: var Parser; b: var Builder; fi, lineHi: int;
       if firstPragLo >= 0: ps.tok(firstPragLo).col
       elif exports[ni]: nm.endCol
       else: nm.col
-    b.addTree "fld"
+    # Field tag reads nifler's `c.section`: normally FldL, but a proc-type field
+    # in an earlier variant branch leaks ParamL into later branch fields.
+    let ftag = if ps.section.len > 0: ps.section else: "fld"
+    b.addTree ftag
     ps.emitInfo(b, nm.line, aCol, kl, kc, false)
     ps.emitName(b, nm, nm.line, aCol)   # field name atom, or `(quoted …)`
     if exports[ni]: b.addRaw " x" else: b.addEmpty
@@ -680,6 +682,7 @@ proc parseObject(ps: var Parser; b: var Builder; objIdx, defIndent: int;
   let kw = ps.tok(objIdx)
   b.addTree "object"
   ps.emitInfo(b, kw.line, kw.col, pl, pc, false)           # object node = keyword pos
+  ps.section = "fld"                                        # nkObjectTy sets FldL
   let objLineEnd = ps.lineEnd(objIdx)
   # inheritance: `of Parent`
   var i = objIdx + 1
@@ -698,6 +701,10 @@ proc parseObject(ps: var Parser; b: var Builder; objIdx, defIndent: int;
   while ps.tok(fi).kind != tkEof and ps.tok(fi).indent > int32(defIndent):
     if ps.tok(fi).kind == tkComment:      # doc comment in object body: dropped
       inc fi; continue
+    # nifler resets `c.section = FldL` before EACH direct recList child, so a
+    # top-level field never inherits a leaked `param` — only fields NESTED in a
+    # when/case branch do.
+    ps.section = "fld"
     if ps.tok(fi).kind == tkKeyword and ps.tok(fi).s == "case":
       fi = ps.parseObjectCase(b, fi, defIndent, kw.line, kw.col)
       continue
