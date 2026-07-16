@@ -1,0 +1,2 @@
+foo() {.executeOnReload.}
+reloadImpl() {.executeOnReload.}

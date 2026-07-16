@@ -1132,6 +1132,20 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
   var bound = ps.lineEnd(startIdx)
   if hiLimit >= 0 and hiLimit < bound: bound = hiLimit
   let hi = ps.semiEnd(startIdx, bound)
+  # statement-trailing pragma: `foo() {.executeOnReload.}` → `(pragmax <expr>
+  # (pragmas …))`. A depth-0 `{.` … `.}` at the END of an expression statement is
+  # a trailing pragma, not a set constructor (`{.` never opens a set).
+  if hi - 1 > startIdx and ps.tok(hi - 1).kind == tkCurlyRi:
+    let opb = ps.matchOpen(hi - 1)
+    if opb > startIdx and ps.tok(opb).kind == tkCurlyLe and
+       ps.tok(opb + 1).kind == tkDot:
+      let brace = ps.tok(opb)
+      b.addTree "pragmax"
+      ps.emitInfo(b, brace.line, brace.col, pl, pc, false)     # pragmax = '{' pos
+      ps.parseExprRange(b, int32(startIdx), int32(opb), brace.line, brace.col)
+      discard ps.parsePragmas(b, opb, brace.line, brace.col)
+      b.endTree()
+      return hi
   let consumed = ps.parseExprStmt(b, int32(startIdx), int32(hi), pl, pc)
   result = if consumed > hi: consumed else: hi
 
