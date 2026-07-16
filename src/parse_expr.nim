@@ -171,7 +171,14 @@ proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32;
       ps.emitInfo(b, kw.line, kw.col, ifTok.line, ifTok.col, false)
       let bt = ps.tok(bodyLo)
       if bare:
-        ps.parseBareResultBody(b, int32(bodyLo), int32(nxt), kw.line, kw.col)
+        if colon >= 0 and bt.line != ps.tok(colon).line:
+          # body on a new indented line → wrapped in `(stmts …)` even in bare mode
+          b.addTree "stmts"
+          ps.emitInfo(b, bt.line, bt.col, kw.line, kw.col, false)
+          ps.parseBareResultBody(b, int32(bodyLo), int32(nxt), bt.line, bt.col)
+          b.endTree()
+        else:
+          ps.parseBareResultBody(b, int32(bodyLo), int32(nxt), kw.line, kw.col)
       else:
         b.addTree "stmts"
         ps.emitInfo(b, bt.line, bt.col, kw.line, kw.col, false)
@@ -186,7 +193,14 @@ proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32;
       ps.parseExprRange(b, int32(i + 1), int32(colon), ct.line, ct.col)
       let bt = ps.tok(bodyLo)
       if bare:
-        ps.parseBareResultBody(b, int32(bodyLo), int32(nxt), ct.line, ct.col)
+        if colon >= 0 and bt.line != ps.tok(colon).line:
+          # body on a new indented line → wrapped in `(stmts …)` even in bare mode
+          b.addTree "stmts"
+          ps.emitInfo(b, bt.line, bt.col, ct.line, ct.col, false)
+          ps.parseBareResultBody(b, int32(bodyLo), int32(nxt), bt.line, bt.col)
+          b.endTree()
+        else:
+          ps.parseBareResultBody(b, int32(bodyLo), int32(nxt), ct.line, ct.col)
       else:
         b.addTree "stmts"
         ps.emitInfo(b, bt.line, bt.col, ct.line, ct.col, false)
