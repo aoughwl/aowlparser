@@ -307,8 +307,7 @@ proc findSplit(ps: Parser; lo, hi: int; typeCtx = false): int =
          # A left neighbour that is a PREFIX type modifier (`var ref T`, `sink ptr
          # X`, `lent ref Y`) makes `ref`/`ptr` that modifier's operand, not an
          # infix — otherwise `var ref T` mis-splits into `(infix ref (mut) T)`.
-         ps.tok(i - 1).s notin ["ptr", "ref", "var", "out", "lent", "sink",
-                                "distinct", "static", "type", "mut", "owned"]:
+         ps.tok(i - 1).s notin ["ptr", "ref", "var", "out", "distinct"]:
       if 3 <= bestPrec:
         bestPrec = 3
         result = i
