@@ -637,7 +637,8 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
     let ctrl = inner.kind == tkKeyword and
                (inner.s == "if" or inner.s == "try" or inner.s == "when" or
                 inner.s == "case" or inner.s == "block" or inner.s == "while" or
-                inner.s == "for")
+                inner.s == "for" or inner.s == "var" or inner.s == "let" or
+                inner.s == "const")
     if semis.len > 0 or ctrl:
       # nifler emits the `expr` node with inherited info (delta 0) and stamps the
       # `(` position on the leading `stmts` node — not the other way round.
@@ -707,6 +708,11 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
           if sj < rpIdx and ps.tok(sj).kind == tkSemicolon: inc sj
         if wrap: b.endTree()   # stmts
         b.endTree()   # block
+      elif rt.kind == tkKeyword and
+           (rt.s == "var" or rt.s == "let" or rt.s == "const"):
+        # a parenthesized declaration `(var `x` = `n`)` is a StmtListExpr whose
+        # result is the decl statement itself → `(expr (stmts) (var …))`.
+        discard ps.parseStmt(b, int32(segLo), t.line, t.col, int32(rpIdx))
       else:
         ps.parseExprRange(b, int32(segLo), int32(rpIdx), t.line, t.col)
       b.endTree()   # expr
