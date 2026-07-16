@@ -56,7 +56,11 @@ proc typeExprEnd(ps: var Parser; lo: int): int =
       # fields) is left to the caller's own multi-line handling. Any other depth-0
       # `{` starts a pragma that ends the type.
       if procType and ps.tok(i + 1).kind == tkDot and t.line == ps.tok(i - 1).line:
-        i = ps.matchClose(i)      # jump to the closing '}'; loop `inc i` steps past
+        # the proc type ENDS right after its trailing pragma — return directly, do
+        # NOT keep scanning (a proc with a return has `inProcReturn` set, which
+        # would otherwise disable the newline-break guard and over-run onto the
+        # next field/line).
+        return ps.matchClose(i) + 1
       else:
         break
     elif isOpenBracket(t.kind):
