@@ -390,14 +390,18 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
     let negNumFold = t.s == "-" and int(lo) + 1 < int(hi) and
                      (nn.kind == tkIntLit or nn.kind == tkFloatLit) and
                      nn.line == t.line and nn.col == t.col + 1
-    # `@[...]` / `@{...}` is a constructor sigil: the `@` binds TIGHTER than a
-    # trailing `.`/`[`/`(` postfix, so `@[""].Field` = `(dot (prefix @ (bracket
-    # "")) Field)`, dot outermost. Fall through to the postfix split when a
-    # postfix follows the constructor's close bracket (bare `@[...]` still folds).
-    let sigilCtorFold = t.s == "@" and int(lo) + 1 < int(hi) and
-                        (nn.kind == tkBracketLe or nn.kind == tkCurlyLe) and
-                        ps.matchClose(int(lo) + 1) < int(hi) - 1
-    if not negNumFold and not sigilCtorFold:
+    # The `@` sigil binds TIGHTER than a trailing `.`/`[`/`(`/`{` postfix, so
+    # `@[""].Field` = `(dot (prefix @ (bracket "")) Field)` and `@objTemp[]` =
+    # `(at (prefix @ objTemp))` — the postfix is outermost. Fall through to the
+    # postfix split whenever a postfix follows the `@`'s primary operand (a bare
+    # `@[...]`/`@x` with no trailing postfix still folds as a prefix here).
+    var sigilFold = false
+    if t.s == "@" and int(lo) + 1 < int(hi):
+      var opEnd = int(lo) + 2
+      if nn.kind == tkBracketLe or nn.kind == tkCurlyLe or nn.kind == tkParLe:
+        opEnd = ps.matchClose(int(lo) + 1) + 1
+      sigilFold = opEnd < int(hi)
+    if not negNumFold and not sigilFold:
       b.addTree "prefix"
       ps.emitInfo(b, t.line, t.col, pl, pc, false)
       b.addIdent t.s

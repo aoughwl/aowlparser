@@ -1,0 +1,1 @@
+discard @objTemp2[]
