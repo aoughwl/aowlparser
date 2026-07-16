@@ -1,2 +1,2 @@
-let z = y.to[:Foo]
-let w = fromBin[:int16]
+proc f(y: int) =
+  let z = y.to[:Foo]
