@@ -107,6 +107,22 @@ proc parseReturnLike(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
   b.endTree()
   result = hi
 
+proc parseAsm(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int =
+  ## `asm [{.pragmas.}] "code"` → `(asm <pragmas-or-.> (suf "code" …))`.
+  let kw = ps.tok(kwIdx)
+  let hi = ps.lineEnd(kwIdx)
+  b.addTree "asm"
+  ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
+  var i = kwIdx + 1
+  if i < hi and ps.tok(i).kind == tkCurlyLe:
+    i = ps.parsePragmas(b, i, kw.line, kw.col)
+  else:
+    b.addEmpty                                # no pragmas
+  if i < hi:
+    ps.parseExprRange(b, int32(i), int32(hi), kw.line, kw.col)   # the asm string
+  b.endTree()
+  result = hi
+
 proc parseImportLike(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
                      tag: string): int =
   let kw = ps.tok(kwIdx)
@@ -1070,6 +1086,7 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
     of "discard": return ps.parseReturnLike(b, startIdx, pl, pc, "discard")
     of "raise": return ps.parseReturnLike(b, startIdx, pl, pc, "raise")
     of "yield": return ps.parseReturnLike(b, startIdx, pl, pc, "yld")
+    of "asm": return ps.parseAsm(b, startIdx, pl, pc)
     of "import": return ps.parseImportLike(b, startIdx, pl, pc, "import")
     of "include": return ps.parseImportLike(b, startIdx, pl, pc, "include")
     of "export": return ps.parseImportLike(b, startIdx, pl, pc, "export")
