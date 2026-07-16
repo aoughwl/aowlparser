@@ -90,6 +90,11 @@ proc parseArg(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       b.endTree()
       b.endTree()
       return
+  # `for x in it: body` as a call argument (`collect(for k in xs: k)`) is a for
+  # EXPRESSION → `(for <iter> (unpackflat …) (stmts body))`, not a kv/infix.
+  if head.kind == tkKeyword and head.s == "for":
+    ps.parseForExpr(b, lo, hi, pl, pc, bare = false)
+    return
   let guardKw = head.kind == tkKeyword and
                 (head.s == "if" or head.s == "when" or head.s == "case" or
                  head.s == "try" or head.s == "proc" or head.s == "func" or

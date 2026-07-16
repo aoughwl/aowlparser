@@ -465,7 +465,7 @@ proc parseFor(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int =
   result = ps.emitBody(b, colon, refIndent, firstVar.line, firstVar.col)
   b.endTree()
 
-proc parseForExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
+proc parseForExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32; bare = true) =
   ## `for vars in iter: body` in EXPRESSION position — a parenthesised for loop
   ## `(for _ in items(iter): discard)` (seen inside `compiles(...)`). Bounded by
   ## `hi` (the `)`), with a BARE body (no `(stmts …)` wrapper), mirroring the
@@ -489,10 +489,17 @@ proc parseForExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   ps.emitInfo(b, firstVar.line, firstVar.col, pl, pc, false)
   ps.parseExprRange(b, int32(inIdx + 1), int32(colon), firstVar.line, firstVar.col)
   ps.emitForVars(b, kwIdx, inIdx, firstVar)
+  # A for EXPRESSION in a call argument (`collect(for k in xs: k)`) wraps its body
+  # in `(stmts …)`; a bare paren StmtListExpr result keeps it unwrapped.
+  let bodyFirst = ps.tok(colon + 1)
+  if not bare:
+    b.addTree "stmts"
+    ps.emitInfo(b, bodyFirst.line, bodyFirst.col, firstVar.line, firstVar.col, false)
   var sj = colon + 1
   while sj < int(hi) and ps.tok(sj).kind != tkEof:
     sj = ps.parseStmt(b, sj, firstVar.line, firstVar.col, int(hi))
     if sj < int(hi) and ps.tok(sj).kind == tkSemicolon: inc sj
+  if not bare: b.endTree()
   b.endTree()
 
 proc parseTryExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
