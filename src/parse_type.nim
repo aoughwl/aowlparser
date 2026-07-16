@@ -885,7 +885,11 @@ proc parseParams(ps: var Parser; b: var Builder; lpIdx: int; pl, pc: int32): int
   result = j
 
 proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
-                  tag: string): int =
+                  tag: string; hiBound: int = -1): int =
+  ## `hiBound` (>= 0) caps the body: an ANONYMOUS routine used as an expression
+  ## (`f(proc(): int = b)`) must not let its one-line `= body` read past the
+  ## enclosing call argument — otherwise it swallows the closing `)` and any
+  ## trailing block `:` on the same physical line, and the caller loops forever.
   let kw = ps.tok(kwIdx)
   b.addTree tag
   var i = kwIdx + 1
@@ -968,9 +972,10 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
       # one-line body on the same line as `=`, e.g. `proc f() = echo 1`
       b.addTree "stmts"
       ps.emitInfo(b, first.line, first.col, aTok.line, aTok.col, false)
-      let hi = ps.lineEnd(i)
+      var hi = ps.lineEnd(i)
+      if hiBound >= 0 and hiBound < hi: hi = hiBound   # cap to the enclosing expr
       while i < hi and ps.tok(i).kind != tkEof:
-        i = ps.parseStmt(b, i, first.line, first.col, -1)
+        i = ps.parseStmt(b, i, first.line, first.col, hi)
       b.endTree()
     elif first.indent > refIndent:
       b.addTree "stmts"

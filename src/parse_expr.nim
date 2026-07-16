@@ -410,8 +410,10 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
       discard ps.parseTry(b, int(lo), pl, pc)
       return
     of "proc", "func", "iterator":
-      # anonymous routine expression (lambda): `proc (x): T = body`.
-      discard ps.parseRoutine(b, int(lo), pl, pc, t.s)
+      # anonymous routine expression (lambda): `proc (x): T = body`. Cap the body
+      # at `hi` so `f(proc(): int = b)` inside a control-flow header doesn't read
+      # the `= body` past the argument into the trailing block `:` (an infinite loop).
+      discard ps.parseRoutine(b, int(lo), pl, pc, t.s, int(hi))
       return
     of "addr":
       # `addr x` (space) is a command; `addr(x)` (adjacent paren) is a call and

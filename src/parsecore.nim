@@ -326,7 +326,7 @@ proc parsePostExprBlock(ps: var Parser; b: var Builder; headLo, colonIdx: int;
                         pl, pc: int32): int
 proc skipTrailingDoc(ps: Parser; i, refIndent: int): int
 proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
-                  tag: string): int
+                  tag: string; hiBound: int = -1): int
 # parse_type.nim implements:
 proc parseType(ps: var Parser; b: var Builder; idx: int; pl, pc: int32): int
 proc parseTypeSection(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int
