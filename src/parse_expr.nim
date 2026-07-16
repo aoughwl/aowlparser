@@ -685,7 +685,7 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
     # A bare type keyword standing alone as a primary (`T is object`, `x is tuple`)
     # is an empty type node `(object)`/`(tuple)`, not a name atom. (nifler keeps
     # `enum`/`concept` as bare name atoms here — only object/tuple wrap.)
-    if t.kind == tkKeyword and (t.s == "object" or t.s == "tuple"):
+    if t.kind == tkKeyword and (t.s == "object" or t.s == "tuple" or t.s == "distinct" or t.s == "ref" or t.s == "ptr"):
       b.addTree t.s
       ps.emitInfo(b, t.line, t.col, pl, pc, false)
       b.endTree()
