@@ -1013,6 +1013,19 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
   ## enclosing call argument — otherwise it swallows the closing `)` and any
   ## trailing block `:` on the same physical line, and the caller loops forever.
   let kw = ps.tok(kwIdx)
+  # Bare `proc`/`func`/`iterator` with nothing to parse (next token closes the
+  # enclosing bracket, is a comma, or is at/beyond the body bound) is a proc TYPE,
+  # not a routine: `(proc)` in an expression is `(par (proctype))`. Emitting it as
+  # a named routine would read `)` as the name and the trailing `:` body as a
+  # return type, running past the paren and recursing on the body (a crash).
+  block:
+    let after = ps.tok(kwIdx + 1)
+    if after.kind == tkEof or isCloseBracket(after.kind) or after.kind == tkComma or
+       (hiBound >= 0 and kwIdx + 1 >= hiBound):
+      b.addTree(if tag == "iterator": "itertype" else: "proctype")
+      ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
+      b.endTree()
+      return kwIdx + 1
   b.addTree tag
   var i = kwIdx + 1
   # name — absent for an anonymous routine (`proc (x): T = …`), where the next
