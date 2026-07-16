@@ -360,16 +360,26 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
         b.endTree()
         b.endTree()
         return
-  # --- leading prefix operator (binds looser than postfix): `-a.b` ---
+  # --- leading prefix operator (binds looser than postfix): `-a.b` = `-(a.b)` ---
   if t.kind == tkOperator:
-    b.addTree "prefix"
-    ps.emitInfo(b, t.line, t.col, pl, pc, false)
-    b.addIdent t.s
-    ps.emitInfo(b, t.line, t.col, t.line, t.col, false)
-    if int(lo) + 1 < int(hi):
-      ps.parseExprRange(b, lo + 1, hi, t.line, t.col)
-    b.endTree()
-    return
+    # EXCEPT `-<adjacent number>`: that folds into a signed literal that binds
+    # TIGHTER than a following postfix (`-2147454938.cint` = `(dot (-N) cint)`,
+    # not `-(N.cint)`). We only reach here with a postfix after the number (the
+    # bare `- N` case returned above); fall through so findPostfix recurses to
+    # the fold at the head.
+    let nn = ps.tok(int(lo) + 1)
+    let negNumFold = t.s == "-" and int(lo) + 1 < int(hi) and
+                     (nn.kind == tkIntLit or nn.kind == tkFloatLit) and
+                     nn.line == t.line and nn.col == t.col + 1
+    if not negNumFold:
+      b.addTree "prefix"
+      ps.emitInfo(b, t.line, t.col, pl, pc, false)
+      b.addIdent t.s
+      ps.emitInfo(b, t.line, t.col, t.line, t.col, false)
+      if int(lo) + 1 < int(hi):
+        ps.parseExprRange(b, lo + 1, hi, t.line, t.col)
+      b.endTree()
+      return
   # --- keyword-led forms ---
   if t.kind == tkKeyword:
     case t.s

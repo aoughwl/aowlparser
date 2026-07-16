@@ -117,6 +117,13 @@ proc parseTypeRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   if first.kind == tkKeyword and first.s == "tuple":
     parseTupleInline(ps, b, lo, hi, pl, pc)
     return
+  # bare `object` type keyword (empty, e.g. the rhs of `int | object`) → `(object)`
+  # with NO children — distinct from a type-def `= object` which is `(object .)`.
+  if first.kind == tkKeyword and first.s == "object" and int(lo) + 1 == int(hi):
+    b.addTree "object"
+    ps.emitInfo(b, first.line, first.col, pl, pc, false)
+    b.endTree()
+    return
   # parenthesized anonymous tuple type: `(string, int)` → `(tup string int)`,
   # `(line: int32, col: int32)` → `(tup (kv line int32) …)`. A SINGLE grouped
   # element with no `,`/`:` is a grouping paren, not a tuple → `(par x)`
