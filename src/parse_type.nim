@@ -20,6 +20,7 @@ proc parseObject(ps: var Parser; b: var Builder; objIdx, defIndent: int; pl, pc:
 proc parseObjectCase(ps: var Parser; b: var Builder; caseIdx, defIndent: int; kl, kc: int32): int
 proc parseObjectWhen(ps: var Parser; b: var Builder; whenIdx, defIndent: int; kl, kc: int32): int
 proc parseEnum(ps: var Parser; b: var Builder; enumIdx, defIndent: int; pl, pc: int32): int
+proc parseTupleBody(ps: var Parser; b: var Builder; tupIdx, defIndent: int; pl, pc: int32): int
 proc parseTypeDef(ps: var Parser; b: var Builder; nameIdx, typeKwCol: int; pl, pc: int32): int
 
 # --- helpers -----------------------------------------------------------------
@@ -855,6 +856,43 @@ proc parseConcept(ps: var Parser; b: var Builder; conceptIdx, defIndent: int;
     result = hi
   b.endTree()   # concept
 
+proc parseTupleBody(ps: var Parser; b: var Builder; tupIdx, defIndent: int;
+                    pl, pc: int32): int =
+  ## Indented tuple type `type X = tuple⏎  a: int⏎  b: string` →
+  ## `(tuple (kv a int) (kv b string))`. The fields are on lines indented deeper
+  ## than the def (like an object body), NOT in `[ ]`.
+  let kw = ps.tok(tupIdx)
+  b.addTree "tuple"
+  ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
+  var fi = ps.lineEnd(tupIdx)
+  while ps.tok(fi).kind != tkEof and ps.tok(fi).indent > int32(defIndent):
+    if ps.tok(fi).kind == tkComment: inc fi; continue
+    let lineHi = ps.lineEnd(fi)
+    # `name (, name)* : type` — a shared type duplicated into each kv.
+    var names: seq[Token] = @[]
+    var i = fi
+    while i < lineHi and (ps.tok(i).kind == tkIdent or ps.tok(i).kind == tkKeyword):
+      names.add ps.tok(i)
+      inc i
+      if i < lineHi and ps.tok(i).kind == tkComma: inc i
+      else: break
+    var tLo = -1
+    var tHi = lineHi
+    if i < lineHi and ps.tok(i).kind == tkColon:
+      tLo = i + 1
+    for nm in names:
+      b.addTree "kv"
+      ps.emitInfo(b, nm.line, nm.col, pl, pc, false)
+      ps.emitName(b, nm, nm.line, nm.col)
+      if tLo >= 0:
+        parseTypeRange(ps, b, int32(tLo), int32(tHi), nm.line, nm.col)
+      else:
+        b.addEmpty
+      b.endTree()
+    fi = if lineHi > fi: lineHi else: fi + 1
+  b.endTree()
+  result = fi
+
 proc parseTypeDef(ps: var Parser; b: var Builder; nameIdx, typeKwCol: int;
                   pl, pc: int32): int =
   ## Emit one `(type name export generics pragma rhs...)`. Returns index after
@@ -912,6 +950,11 @@ proc parseTypeDef(ps: var Parser; b: var Builder; nameIdx, typeKwCol: int;
       resultIdx = ps.parseEnum(b, rhsIdx, defIndent, eqTok.line, eqTok.col)
     elif r.kind == tkKeyword and r.s == "concept":
       resultIdx = ps.parseConcept(b, rhsIdx, defIndent, eqTok.line, eqTok.col)
+    elif r.kind == tkKeyword and r.s == "tuple" and
+         ps.tok(rhsIdx + 1).kind != tkBracketLe and
+         ps.tok(rhsIdx + 1).indent > int32(defIndent):
+      # indented `= tuple⏎  a: T` body (no `[ ]`) — fields on deeper lines
+      resultIdx = ps.parseTupleBody(b, rhsIdx, defIndent, eqTok.line, eqTok.col)
     elif r.kind == tkKeyword and (r.s == "ref" or r.s == "ptr") and
          ps.tok(rhsIdx + 1).kind == tkKeyword and ps.tok(rhsIdx + 1).s == "object":
       b.addTree r.s
