@@ -1131,6 +1131,19 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
         i = ps.parseStmt(b, i, first.line, first.col, -1)
         i = ps.skipTrailingDoc(i, first.indent)   # drop each stmt's trailing `##` doc
       b.endTree()
+    elif anon and first.indent >= 0 and hiBound >= 0 and i < hiBound:
+      # ANON routine mid-expression (`f(⏎ proc() =⏎ body⏎ )`): `proc` sits at a
+      # large column while its `= body` block is indented only to the ENCLOSING
+      # statement, so `first.indent > kw.col` is false and the body would be
+      # dropped. Use the body's OWN indent as the block threshold, bounded by the
+      # enclosing expression range `hiBound`.
+      b.addTree "stmts"
+      ps.emitInfo(b, first.line, first.col, aTok.line, aTok.col, false)
+      let bodyRef = int(first.indent) - 1
+      while ps.tok(i).kind != tkEof and int(ps.tok(i).indent) > bodyRef and i < hiBound:
+        i = ps.parseStmt(b, i, first.line, first.col, hiBound)
+        i = ps.skipTrailingDoc(i, first.indent)
+      b.endTree()
     else:
       b.addEmpty
   else:
