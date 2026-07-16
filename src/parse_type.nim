@@ -867,8 +867,17 @@ proc parseTypeSection(ps: var Parser; b: var Builder; kwIdx: int;
   else:
     # indented block of defs
     var j = i
+    let memberIndent = ps.tok(i).indent   # column of the section's type defs
     while ps.tok(j).kind != tkEof and ps.tok(j).indent > int32(typeKwCol):
-      if ps.tok(j).kind == tkComment:     # doc comment between type defs: dropped
+      if ps.tok(j).kind == tkComment:
+        # A comment AT the member indent is a standalone member → a sibling
+        # `(comment)` (mirrors parseSection); a DEEPER comment is the trailing
+        # doc of the preceding def and is dropped.
+        if ps.tok(j).indent == memberIndent:
+          let ct = ps.tok(j)
+          b.addTree "comment"
+          ps.emitInfo(b, ct.line, ct.col, pl, pc, false)
+          b.endTree()
         inc j; continue
       j = ps.parseTypeDef(b, j, typeKwCol, pl, pc)
     result = j
