@@ -849,7 +849,8 @@ proc parsePostExprBlock(ps: var Parser; b: var Builder; headLo, colonIdx: int;
         ps.parseExprRange(b, int32(headLo), int32(doIdx), callAnchor.line, callAnchor.col)
       b.addTree "do"
       ps.emitInfo(b, bodyFirst.line, bodyFirst.col, callAnchor.line, callAnchor.col, false)
-      discard ps.parseParams(b, doIdx + 1, bodyFirst.line, bodyFirst.col)   # (params …) + ret type
+      # do-block: `:` is the body, only `->` gives a return type (colonIsReturn=false)
+      discard ps.parseParams(b, doIdx + 1, bodyFirst.line, bodyFirst.col, colonIsReturn = false)
       result = ps.emitBody(b, colonIdx, refIndent, bodyFirst.line, bodyFirst.col)
       b.endTree()   # do
       b.endTree()   # call
