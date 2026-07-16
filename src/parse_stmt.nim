@@ -991,11 +991,21 @@ proc parseStmtImpl(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
   ## Parse a run of `;`-separated statements on the same logical line (each an
   ## `(stmts …)` sibling), bounded by `hiLimit` (a branch/brace body) or the
   ## logical line. Returns the index after the last one.
-  var i = ps.parseOneStmt(b, startIdx, pl, pc, hiLimit)
   var bound = ps.lineEnd(startIdx)
   if hiLimit >= 0 and hiLimit < bound: bound = hiLimit
-  while ps.tok(i).kind == tkSemicolon and i + 1 < bound:
-    i = ps.parseOneStmt(b, i + 1, pl, pc, hiLimit)
+  # Skip empty statements — a bare `;` separator (or a run of them) produces no
+  # node in nifler. Without this a *trailing* `;` (`let x = 1;` then EOL/EOF)
+  # would leave the cursor parked on the separator and every caller loop would
+  # re-enter at the same index forever (a hang, not a wrong tree).
+  var start = startIdx
+  while start < bound and ps.tok(start).kind == tkSemicolon: inc start
+  if start >= bound:
+    return start                         # nothing but separators on this line
+  var i = ps.parseOneStmt(b, start, pl, pc, hiLimit)
+  while i < bound and ps.tok(i).kind == tkSemicolon:
+    let nxt = i + 1
+    if nxt >= bound: i = nxt; break      # trailing separator: consume, no stmt after
+    i = ps.parseOneStmt(b, nxt, pl, pc, hiLimit)
   result = i
 
 proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
