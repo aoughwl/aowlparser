@@ -201,7 +201,11 @@ proc continuesLine(prev: Token): bool =
   of tkComma, tkOperator, tkDot: true
   # a binary keyword operator (`and`, `shl`, `in`…) or the prefix `not` cannot
   # end a statement, so a physical line ending on one continues (`x and not⏎ (…)`).
-  of tkKeyword: isBinaryOp(prev) or prev.s == "not"
+  # `import`/`export`/`include`/`from` likewise dangle when their module list is on
+  # the next indented line (`import⏎  std/[hashes, strutils]`).
+  of tkKeyword:
+    isBinaryOp(prev) or prev.s == "not" or prev.s == "import" or
+    prev.s == "export" or prev.s == "include" or prev.s == "from"
   else: false
 
 proc lineEnd(ps: Parser; startIdx: int): int =
