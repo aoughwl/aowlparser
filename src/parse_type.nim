@@ -1170,6 +1170,32 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
       ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
       b.endTree()
       return kwIdx + 1
+  # An ANONYMOUS routine with a signature but NO body (`= …`, or a curly `{ … }`
+  # body in curly mode) is a proc/iterator TYPE, not a literal: `initDeque[proc ()
+  # {.closure.}]`, a generic/return-type argument. A NAMED routine with no body is
+  # a forward declaration and stays a routine; only anonymous ones become types.
+  block:
+    let nm = ps.tok(kwIdx + 1)
+    let isAnon = nm.kind == tkParLe or nm.kind == tkBracketLe or
+                 nm.kind == tkCurlyLe or (nm.kind == tkOperator and nm.s == "=")
+    if isAnon and hiBound >= 0 and not (nm.kind == tkOperator and nm.s == "="):
+      var d = 0
+      var hasBody = false
+      var k = kwIdx + 1
+      while k < hiBound:
+        let tk = ps.tok(k)
+        if isOpenBracket(tk.kind): inc d
+        elif isCloseBracket(tk.kind):
+          if d > 0: dec d
+        elif d == 0 and tk.kind == tkOperator and tk.s == "=":
+          hasBody = true; break
+        elif d == 0 and ps.curly and tk.kind == tkCurlyLe and
+             ps.tok(k + 1).kind != tkDot:
+          hasBody = true; break
+        inc k
+      if not hasBody:
+        ps.parseProcType(b, int32(kwIdx), int32(hiBound), pl, pc)
+        return hiBound
   b.addTree tag
   var i = kwIdx + 1
   # name — absent for an anonymous routine (`proc (x): T = …`), where the next
