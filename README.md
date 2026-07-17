@@ -44,6 +44,17 @@ markedly better front end for editors, LSPs, and CI:
   (`if x = 5:` → *did you mean `==`?*), empty conditions (`elif:`), empty comma
   slots (`foo(a,,b)` — while correctly allowing a valid *trailing* comma),
   invalid numeric/identifier literals, and full UTF-8 identifier support.
+- **"Forgot the introducer" family.** Where `nifler` only spits a bare *invalid
+  indentation* at a stray body line, aowlparser names the actual omission and
+  points at the declaration: a routine with a body but no `=`
+  (`proc f()` ⏎ `  echo 1`), a `type Name` with an indented body but no
+  `= object`/`= enum`, and a colon-block whose body isn't indented past its
+  header. Each carries the exact fix-it.
+- **Precise grammar diagnostics** where `nifler` is terse or cryptic: `func`
+  used in a type description (→ *use `proc` with `{.noSideEffect.}`*), a keyword
+  where an enum member is expected (`when` spliced into an `enum` body), an
+  empty object-variant branch (`of A:` with no field — we point at the branch
+  itself, not the innocent next one), and an `of` with no value before its `:`.
 - **Knows what isn't plain Nim.** A file opening with a `#? stdtmpl` source-code
   filter is a template, not Nim — `check` stays silent instead of flagging the
   raw HTML, where `nifler` only tokenizes it by luck.
