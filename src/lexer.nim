@@ -421,6 +421,7 @@ proc canonFloatSuffix(s: string): string =
 
 proc lexNumber(lx: var Lexer): Token =
   result = startToken(lx, tkIntLit)
+  let numStart = lx.pos    # source offset of the first digit/prefix char
   var base = 10
   var digits = ""     # clean digit run for integer decode (no prefix/underscore)
   var floatText = ""  # decimal spelling for float decode (no underscore)
@@ -489,6 +490,10 @@ proc lexNumber(lx: var Lexer): Token =
         else:
           break
 
+  # raw numeric source text (with base prefix, without the `'suffix`), needed to
+  # reproduce a CUSTOM numeric literal (`0xff'big` → `(dot (suf "0xff" "R") 'big)`).
+  let rawText = lx.src[numStart ..< lx.pos]
+
   # ---- type suffix -------------------------------------------------------
   var suffix = ""
   block suffixScan:
@@ -508,7 +513,22 @@ proc lexNumber(lx: var Lexer): Token =
 
   # ---- classify + decode -------------------------------------------------
   let sufl = suffix
-  if sufl.len > 0 and (sufl[0] == 'f' or sufl[0] == 'F' or
+  # A CUSTOM literal suffix (`'big`) is any suffix that is not a builtin numeric
+  # type suffix. It is emitted structurally differently (a `(dot (suf …) 'big)`),
+  # so flag it and keep the raw source text in `result.s`.
+  var custom = false
+  if sufl.len > 0:
+    let builtin =
+      sufl == "i" or sufl == "i8" or sufl == "i16" or sufl == "i32" or
+      sufl == "i64" or sufl == "u" or sufl == "u8" or sufl == "u16" or
+      sufl == "u32" or sufl == "u64" or sufl == "f" or sufl == "F" or
+      sufl == "f32" or sufl == "f64" or sufl == "f128" or sufl == "d" or sufl == "D"
+    custom = not builtin
+  if custom:
+    result.kind = tkIntLit
+    result.suffix = sufl
+    result.s = rawText
+  elif sufl.len > 0 and (sufl[0] == 'f' or sufl[0] == 'F' or
                        sufl[0] == 'd' or sufl[0] == 'D'):
     isFloat = true
     result.suffix = canonFloatSuffix(sufl)
@@ -516,7 +536,9 @@ proc lexNumber(lx: var Lexer): Token =
     # integer / unsigned suffix (i8/i16/i32/i64/u/u8/u16/u32/u64)
     result.suffix = sufl
 
-  if isFloat:
+  if custom:
+    discard   # raw text already stored; no numeric decode needed
+  elif isFloat:
     result.kind = tkFloatLit
     if base != 10:
       # A hex/oct/bin literal with a FLOAT suffix (`0x7FF0000000000000'f64`)

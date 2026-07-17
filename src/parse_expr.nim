@@ -392,6 +392,24 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
     if (n.kind == tkIntLit or n.kind == tkFloatLit) and
        n.line == t.line and n.col == t.col + 1:
       let suf = n.suffix
+      let sufBuiltin =
+        suf == "i" or suf == "i8" or suf == "i16" or suf == "i32" or suf == "i64" or
+        suf == "u" or suf == "u8" or suf == "u16" or suf == "u32" or suf == "u64" or
+        suf == "f" or suf == "f32" or suf == "f64" or suf == "f128" or suf == "d"
+      if suf.len > 0 and not sufBuiltin:
+        # `-N'big` folds the sign INTO the custom literal's raw text:
+        # `(dot (suf "-<raw>" "R") '<suffix>)`.
+        b.addTree "dot"
+        ps.emitInfo(b, t.line, t.col, pl, pc, false)
+        b.addTree "suf"
+        ps.emitInfo(b, t.line, t.col, t.line, t.col, false)
+        b.addStrLit("-" & n.s)
+        b.addStrLit "R"
+        b.endTree()   # suf
+        b.addIdent("'" & suf)
+        ps.emitInfo(b, t.line, t.col, t.line, t.col, false)
+        b.endTree()   # dot
+        return
       if n.kind == tkIntLit:
         let v = -n.iVal
         if suf.len > 0:
@@ -617,7 +635,24 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
     # Unsigned types render the number itself with a trailing `u` (`100u`); the
     # bare `'u` (uint) is special-cased to `Nu` with no `(suf)` wrapper.
     let suf = t.suffix
-    if suf.len == 0:
+    # A CUSTOM literal suffix (`1'big`, `0xff'big`) is not a builtin numeric type
+    # suffix; it renders as `(dot (suf "<rawtext>" "R") '<suffix>)` — the number's
+    # SOURCE text passed as a raw string to the `'<suffix>` custom-literal proc.
+    let sufBuiltin =
+      suf == "i" or suf == "i8" or suf == "i16" or suf == "i32" or suf == "i64" or
+      suf == "u" or suf == "u8" or suf == "u16" or suf == "u32" or suf == "u64"
+    if suf.len > 0 and not sufBuiltin:
+      b.addTree "dot"
+      ps.emitInfo(b, t.line, t.col, pl, pc, false)
+      b.addTree "suf"
+      ps.emitInfo(b, t.line, t.col, t.line, t.col, false)
+      b.addStrLit t.s
+      b.addStrLit "R"
+      b.endTree()   # suf
+      b.addIdent("'" & suf)
+      ps.emitInfo(b, t.line, t.col, t.line, t.col, false)
+      b.endTree()   # dot
+    elif suf.len == 0:
       if t.iVal > 2147483647'i64 or t.iVal < -2147483648'i64:
         b.addTree "suf"
         ps.emitInfo(b, t.line, t.col, pl, pc, false)
