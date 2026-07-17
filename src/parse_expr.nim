@@ -851,6 +851,21 @@ proc parseExprRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
      head.s == "try" or procIsRoutine):
     ps.parsePrimaryRange(b, lo, hi, pl, pc)
     return
+  # Trailing pragma on an expression operand: `x {.noSideEffect.}` / `(a: T)
+  # {.gcsafe.}` (the parameter/type of a `=>`/`->` lambda-sugar) → `(pragmax
+  # <expr> (pragmas …))`, mirroring the statement-level trailing-pragma handler.
+  # A proc/iterator-led range already returned above (its `{.…}` are the routine's).
+  if int(hi) - 1 > int(lo) and ps.tok(int(hi) - 1).kind == tkCurlyRi:
+    let opb = ps.matchOpen(int(hi) - 1)
+    if opb > int(lo) and ps.tok(opb).kind == tkCurlyLe and
+       ps.tok(opb + 1).kind == tkDot:
+      let brace = ps.tok(opb)
+      b.addTree "pragmax"
+      ps.emitInfo(b, brace.line, brace.col, pl, pc, false)   # pragmax = '{' pos
+      ps.parseExprRange(b, lo, int32(opb), brace.line, brace.col)   # decorated expr
+      discard ps.parsePragmas(b, opb, brace.line, brace.col)
+      b.endTree()
+      return
   # A command call whose callee starts at `lo` binds LOOSER than binary operators
   # — `f a & b` is `f(a & b)`, not `(f a) & b` — so it must be recognised BEFORE
   # the operator split. (A command on the RHS of an operator, `p & f a`, is found

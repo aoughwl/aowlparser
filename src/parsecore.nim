@@ -89,6 +89,11 @@ proc startsArg(ps: Parser; i, hi: int): bool =
     let leadSpace = t.line != prev.line or t.col > prev.endCol
     let nxt = ps.tok(i + 1)
     return leadSpace and nxt.line == t.line and nxt.col == t.endCol
+  # A `{.` (pragma open) is NOT a command argument — it is a trailing pragma on
+  # the preceding expression (`x {.noSideEffect.} => …` = `(pragmax x …)`), not a
+  # set literal that `x` is applied to.
+  if t.kind == tkCurlyLe and i + 1 < hi and ps.tok(i + 1).kind == tkDot:
+    return false
   result = startsExpr(t) and not isBinaryOp(t)
 
 proc cmdCalleeEnd(ps: Parser; lo, hi: int): int =
@@ -411,3 +416,4 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
 # parse_type.nim implements:
 proc parseType(ps: var Parser; b: var Builder; idx: int; pl, pc: int32): int
 proc parseTypeSection(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int
+proc parsePragmas(ps: var Parser; b: var Builder; braceIdx: int; pl, pc: int32): int

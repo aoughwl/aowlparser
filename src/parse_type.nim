@@ -14,7 +14,7 @@ proc parseProcType(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
 proc parseTupleInline(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
 proc parseParams(ps: var Parser; b: var Builder; lpIdx: int; pl, pc: int32;
                  colonIsReturn: bool = true): int
-proc parsePragmas(ps: var Parser; b: var Builder; braceIdx: int; pl, pc: int32): int
+# parsePragmas is forward-declared in parsecore.nim (needed by parse_expr too).
 proc parseGenerics(ps: var Parser; b: var Builder; lbIdx: int; pl, pc: int32): int
 proc parseObject(ps: var Parser; b: var Builder; objIdx, defIndent: int; pl, pc: int32): int
 proc parseObjectCase(ps: var Parser; b: var Builder; caseIdx, defIndent: int; kl, kc: int32): int
