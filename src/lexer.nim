@@ -727,6 +727,10 @@ proc lexBackquotedIdent(lx: var Lexer): Token =
       one.add c; s.add c; advance lx
       parts.add one
   if lx.cur == '`': advance lx
+  else:
+    lx.addDiag(sevError, "unterminated-backtick",
+               "closing ` expected for accent-quoted identifier",
+               result.line, result.col, lx.col)
   result.s = s
   result.parts = parts
   result.partCols = partCols

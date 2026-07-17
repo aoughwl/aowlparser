@@ -143,6 +143,22 @@ proc checkGrammar(toks: seq[Token]): seq[Diagnostic] =
           fix: "did you mean '=='?")
         break
       inc j
+  # An EMPTY comma-separated slot — a doubled `,,` or a leading `(,`/`[,` — has
+  # no expression where one is required, so nifler reports "expression expected,
+  # but found ','". A TRAILING comma (`foo(a,)`, `[1,2,]`, `(1,)`) is valid Nim
+  # and must NOT be flagged, so we only look at what comes BEFORE the comma:
+  # another comma, or an opening `(`/`[`. This cannot false-positive.
+  for i in 0 ..< toks.len:
+    if toks[i].kind != tkComma: continue
+    # previous significant (non-comment) token
+    var p = i - 1
+    while p >= 0 and toks[p].kind == tkComment: dec p
+    if p < 0: continue
+    let pk = toks[p].kind
+    if pk == tkComma or pk == tkParLe or pk == tkBracketLe:
+      result.add Diagnostic(severity: sevError, code: "expression-expected",
+        message: "expression expected before ','",
+        line: toks[i].line, col: toks[i].col, endCol: toks[i].endCol)
   # last significant (non-comment) token
   var last = -1
   for i in countdown(toks.len - 1, 0):

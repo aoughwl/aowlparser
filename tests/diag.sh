@@ -193,6 +193,26 @@ for ok in 'let s = "a\nb\t\\x41é"' 'let s = "\x1B"' 'let s = "\u{1F600}"' \
     echo "FAIL: valid literal '$ok' must be silent"; fail=1; }
 done
 
+# (4l) unterminated accent-quoted identifier, and empty comma slots. A trailing
+# comma is valid Nim and must stay silent; only a doubled `,,` or leading `(,`/
+# `[,` is an error.
+printf 'let `a = 1\n' > "$WORK/bt.nim"
+grep -q 'unterminated-backtick' <<<"$("$NP" check "$WORK/bt.nim" 2>&1)" || {
+  echo "FAIL: unterminated backtick should report unterminated-backtick"; fail=1; }
+printf 'proc `[]=`(x: int) = discard\n' > "$WORK/bt.nim"
+grep -q 'unterminated-backtick' <<<"$("$NP" check "$WORK/bt.nim" 2>&1)" && {
+  echo "FAIL: a closed backtick ident must be silent"; fail=1; }
+for bad in 'foo(a,,b)' 'foo(,b)' '[1,,2]' 'seq[int,,]'; do
+  printf '%s\n' "$bad" > "$WORK/cc.nim"
+  grep -q 'expression-expected' <<<"$("$NP" check "$WORK/cc.nim" 2>&1)" || {
+    echo "FAIL: '$bad' should report expression-expected (empty comma slot)"; fail=1; }
+done
+for ok in 'foo(a,)' 'foo(a, b,)' '[1,2,]' '(1,)'; do
+  printf '%s\n' "$ok" > "$WORK/cc.nim"
+  grep -q 'expression-expected' <<<"$("$NP" check "$WORK/cc.nim" 2>&1)" && {
+    echo "FAIL: trailing comma '$ok' is valid and must be silent"; fail=1; }
+done
+
 # (5) diagnostics are emitted in SOURCE ORDER (top-to-bottom), not validator order.
 printf 'let a = (1\nvar b = {2\n' > "$WORK/ord.nim"
 lines="$("$NP" check "$WORK/ord.nim" 2>&1)"
