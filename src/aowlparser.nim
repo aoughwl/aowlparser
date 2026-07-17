@@ -67,6 +67,48 @@ proc checkBrackets(toks: seq[Token]): seq[Diagnostic] =
       message: "unclosed '" & openerFor(t.kind) & "'",
       line: t.line, col: t.col, endCol: t.col + 1)
 
+proc checkGrammar(toks: seq[Token]): seq[Diagnostic] =
+  ## Grammar-level errors the range-splitter silently copes with but nifler
+  ## rejects. Purely a validator — never changes the emitted AIF. Conservative:
+  ## every case here is UNAMBIGUOUSLY malformed (zero false positives on valid
+  ## Nim), so `check` can flag it the way a real front end would.
+  result = @[]
+  # last significant (non-comment) token
+  var last = -1
+  for i in countdown(toks.len - 1, 0):
+    if toks[i].kind != tkEof and toks[i].kind != tkComment:
+      last = i; break
+  if last < 0: return
+  let t = toks[last]
+  # An operator, comma, or dot as the FINAL token has no operand after it —
+  # `let x = 1 +`, `foo(a,` (the bracket check also flags the paren), `a.` — so
+  # nifler reports "expression expected". Even a *prefix* operator needs a
+  # following operand, so ANY trailing operator is incomplete. `=` is excluded:
+  # a proc header can legitimately end `= <body>` and a lone trailing `=` is
+  # rare enough to leave to the bracket/indent checks.
+  let kwOp = t.kind == tkKeyword and t.s in
+    ["and", "or", "xor", "div", "mod", "shl", "shr", "in", "notin",
+     "is", "isnot", "not", "of"]
+  if t.kind == tkComma or t.kind == tkDot or
+     (t.kind == tkOperator and t.s != "=") or kwOp:
+    result.add Diagnostic(severity: sevError, code: "expression-expected",
+      message: "expression expected after '" &
+               (if t.kind == tkComma: "," elif t.kind == tkDot: "." else: t.s) &
+               "'", line: t.line, col: t.col, endCol: t.endCol)
+
+proc sortBySourceOrder(diags: var seq[Diagnostic]) =
+  ## Stable insertion sort by (line, col) so `check`/JSON output reads
+  ## top-to-bottom instead of validator-internal order. Diagnostic counts are
+  ## tiny, so an O(n²) sort is fine and avoids a stdlib dependency.
+  for i in 1 ..< diags.len:
+    let cur = diags[i]
+    var j = i - 1
+    while j >= 0 and (diags[j].line > cur.line or
+                      (diags[j].line == cur.line and diags[j].col > cur.col)):
+      diags[j + 1] = diags[j]
+      dec j
+    diags[j + 1] = cur
+
 proc sevName(s: Severity): string =
   case s
   of sevError: "error"
@@ -120,6 +162,8 @@ proc collectDiags(src: string; opts: LexOptions): (seq[Token], seq[Diagnostic]) 
   let toks = tokenize(src, opts, errors)
   var diags = gLexDiags
   for d in checkBrackets(toks): diags.add d
+  for d in checkGrammar(toks): diags.add d
+  sortBySourceOrder(diags)   # source-order for top-to-bottom reading
   result = (toks, diags)
 
 proc runParse(src, outp, fileField: string; toStdout, strict, curly: bool;

@@ -38,5 +38,20 @@ out="$("$NP" check "$WORK/ok.nim" 2>&1)"; rc=$?
 [ -z "$out" ] || { echo "FAIL: valid file produced diagnostics: $out"; fail=1; }
 [ "$rc" -eq 0 ] || { echo "FAIL: valid file exit was $rc, want 0"; fail=1; }
 
+# (4) GRAMMAR error nifler catches but the bracket check alone would miss: a
+# trailing binary/keyword operator has no operand → expression-expected.
+for tail in 'let x = 1 +' 'let y = a and' 'foo(a,'; do
+  printf '%s\n' "$tail" > "$WORK/g.nim"
+  out="$("$NP" check "$WORK/g.nim" 2>&1)"
+  grep -q 'expression-expected' <<<"$out" || {
+    echo "FAIL: '$tail' should report expression-expected; got: $out"; fail=1; }
+done
+
+# (5) diagnostics are emitted in SOURCE ORDER (top-to-bottom), not validator order.
+printf 'let a = (1\nvar b = {2\n' > "$WORK/ord.nim"
+lines="$("$NP" check "$WORK/ord.nim" 2>&1)"
+first_line="$(head -1 <<<"$lines" | sed -E 's/.*:([0-9]+):[0-9]+:.*/\1/')"
+[ "$first_line" = "1" ] || { echo "FAIL: diagnostics not source-ordered (first at line $first_line)"; fail=1; }
+
 if [ "$fail" -eq 0 ]; then echo "diag: all checks passed"; else echo "diag: FAILURES above"; fi
 exit "$fail"
