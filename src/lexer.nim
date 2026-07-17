@@ -158,7 +158,13 @@ proc advance(lx: var Lexer) =
     inc lx.pos
 
 proc isIdentStart(c: char): bool =
-  c == '_' or (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z')
+  ## Nim identifiers are UTF-8: any byte >= 0x80 (a unicode lead/continuation
+  ## byte) is a valid identifier character, so `café`, `åäö`, Cyrillic and CJK
+  ## names lex as single identifiers rather than a run of illegal bytes. The
+  ## classic lexer does the same (it never validates UTF-8 here — it just accepts
+  ## high bytes and emits them verbatim).
+  c == '_' or (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
+    (uint8(c) >= 0x80'u8)
 
 proc isIdentCont(c: char): bool =
   isIdentStart(c) or (c >= '0' and c <= '9')
@@ -670,14 +676,15 @@ proc tokenize*(src: string; opts: LexOptions; errors: var int): seq[Token] =
   var lx = initLexer(src, opts)
   result = @[]
   # --- leading UTF-8 BOM (EF BB BF) -------------------------------------------
-  if lx.opts.bomPolicy != bomDefault and lx.n >= 3 and
-     src[0] == '\xEF' and src[1] == '\xBB' and src[2] == '\xBF':
+  # A leading BOM is ALWAYS consumed (nifler strips it). This used to be gated on
+  # a non-default policy, relying on the BOM bytes falling through to the
+  # unknown-byte skip otherwise — but now that identifiers accept high bytes
+  # (UTF-8 names), an unstripped BOM would glue onto the first identifier. Consume
+  # the 3 bytes WITHOUT advancing the column so line-1 indentation is unaffected.
+  if lx.n >= 3 and src[0] == '\xEF' and src[1] == '\xBB' and src[2] == '\xBF':
     if lx.opts.bomPolicy == bomReject:
       lx.addDiag(sevError, "bom-rejected",
                  "leading UTF-8 BOM rejected [--bom:reject]", 1, 0, 0)
-    # Both strip and reject consume the 3 BOM bytes WITHOUT advancing the column,
-    # so line-1 indentation/columns are unaffected (fixes the latent col-shift of
-    # the legacy unknown-byte skip). The default (bomDefault) path is untouched.
     lx.pos = 3
   while lx.pos < lx.n:
     let before = result.len
