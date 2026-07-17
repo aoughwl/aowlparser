@@ -92,6 +92,7 @@ type
     sawSpaceInIndent: bool   ## tpBoth mixing detection: state for current line
     sawTabInIndent: bool
     warnedMixThisLine: bool
+    tabErrThisLine: bool     ## tpSpaces: already flagged an illegal tab on this line
     errors: int              ## unknown/illegal bytes seen (drives --strict)
     prevIndent: int32        ## indent column of the previous first-on-line token
     indentUnit: int32        ## derived indentation step (--indent-consistency)
@@ -141,6 +142,7 @@ proc advance(lx: var Lexer) =
       lx.sawSpaceInIndent = false
       lx.sawTabInIndent = false
       lx.warnedMixThisLine = false
+      lx.tabErrThisLine = false
     elif ch == '\t' and lx.opts.tabPolicy != tpSpaces:
       # A tab counts as `tabWidth` columns once tabs are permitted, so a
       # tab-indented line reports the same `indent` as its space-expanded
@@ -383,12 +385,26 @@ proc lexChar(lx: var Lexer): Token =
   result = startToken(lx, tkCharLit)
   advance lx # opening quote
   var s = ""
-  if lx.cur == '\\':
-    decodeEscape(lx, s)
+  if lx.cur == '\'':
+    # `''` — an empty character literal has no content to name a byte value.
+    lx.addDiag(sevError, "invalid-character-literal",
+               "invalid character literal — a char must hold exactly one character",
+               result.line, result.col, lx.col)
+    advance lx # consume the closing quote so lexing recovers past it
   else:
-    s.add lx.cur
-    advance lx
-  if lx.cur == '\'': advance lx
+    if lx.cur == '\\':
+      decodeEscape(lx, s)
+    else:
+      s.add lx.cur
+      advance lx
+    if lx.cur == '\'': advance lx
+    else:
+      # No closing quote where one is required: either a run-on literal
+      # (`'ab'`) or one cut off by end-of-line/file (`'a`). nifler reports both
+      # as a missing closing quote.
+      lx.addDiag(sevError, "unterminated-char",
+                 "missing closing ' for character literal",
+                 result.line, result.col, lx.col)
   if s.len > 0:
     result.iVal = int64(ord(s[0]))
   result.s = s
@@ -681,6 +697,8 @@ proc lexBackquotedIdent(lx: var Lexer): Token =
 
 proc skipBlockComment(lx: var Lexer) =
   ## `#[ ... ]#`, nesting-aware.
+  let startLine = lx.line
+  let startCol = lx.col
   advance lx # '#'
   advance lx # '['
   var depth = 1
@@ -691,10 +709,15 @@ proc skipBlockComment(lx: var Lexer) =
       advance lx; advance lx; dec depth
     else:
       advance lx
+  if depth > 0:
+    lx.addDiag(sevError, "unterminated-comment",
+               "end of multiline comment expected", startLine, startCol, lx.col)
 
 proc skipDocBlockComment(lx: var Lexer) =
   ## `##[ ... ]##` doc block comment, nesting-aware (nests on `##[`, closes on
   ## `]##`). Matches the classic lexer's `skipMultiLineComment(isDoc=true)`.
+  let startLine = lx.line
+  let startCol = lx.col
   advance lx; advance lx; advance lx # '##['
   var depth = 1
   while lx.pos < lx.n and depth > 0:
@@ -704,6 +727,9 @@ proc skipDocBlockComment(lx: var Lexer) =
       advance lx; advance lx; advance lx; dec depth
     else:
       advance lx
+  if depth > 0:
+    lx.addDiag(sevError, "unterminated-comment",
+               "end of multiline comment expected", startLine, startCol, lx.col)
 
 proc tokenize*(src: string): seq[Token]
 
@@ -729,6 +755,15 @@ proc tokenize*(src: string; opts: LexOptions; errors: var int): seq[Token] =
     let before = result.len
     let c = lx.cur
     if c == ' ' or c == '\t' or c == '\r':
+      # Under the default (nifler-compatible) tpSpaces policy, a tab anywhere in
+      # the token stream — leading OR mid-line — is illegal Nim; only tabs inside
+      # string/char literals and comments (consumed elsewhere) are exempt. One
+      # diagnostic per line keeps a tab-indented block from spamming.
+      if c == '\t' and lx.opts.tabPolicy == tpSpaces and not lx.tabErrThisLine:
+        lx.addDiag(sevError, "tabs-not-allowed",
+                   "tabs are not allowed, use spaces instead",
+                   lx.line, lx.col, lx.col)
+        lx.tabErrThisLine = true
       # tpBoth mixing detection: flag a line whose leading whitespace uses both
       # tabs and spaces (classic Nim rejects tabs outright; we only warn).
       if lx.atLineStart and lx.opts.tabPolicy == tpBoth and c != '\r':

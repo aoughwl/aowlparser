@@ -135,6 +135,41 @@ for ok in "0xFF'u8" "255'u8" "0xFFFFFFFF'u32"; do
   [ -z "$("$NP" check "$WORK/oor.nim" 2>&1)" ] || { echo "FAIL: '$ok' (= max) must be silent"; fail=1; }
 done
 
+# (4j) classic lexer errors nifler catches: bad char literals, illegal tabs, and
+# unterminated block comments. Each must fire on the bad form and stay silent on
+# the valid one (zero false positives).
+printf "let c = ''\n" > "$WORK/lx.nim"
+grep -q 'invalid-character-literal' <<<"$("$NP" check "$WORK/lx.nim" 2>&1)" || {
+  echo "FAIL: empty char literal '' should be invalid-character-literal"; fail=1; }
+for bad in "let c = 'ab'" "let c = 'a"; do
+  printf '%s\n' "$bad" > "$WORK/lx.nim"
+  grep -q 'unterminated-char' <<<"$("$NP" check "$WORK/lx.nim" 2>&1)" || {
+    echo "FAIL: '$bad' should report unterminated-char"; fail=1; }
+done
+for ok in "let c = 'a'" "let c = '\\n'" "let c = '\\''" "let c = ' '"; do
+  printf '%s\n' "$ok" > "$WORK/lx.nim"
+  grep -qE 'unterminated-char|invalid-character-literal' <<<"$("$NP" check "$WORK/lx.nim" 2>&1)" && {
+    echo "FAIL: valid char '$ok' must be silent"; fail=1; }
+done
+# a tab anywhere outside strings/comments is illegal Nim (leading OR mid-line).
+printf 'if true:\n\techo 1\n' > "$WORK/lx.nim"
+tout="$("$NP" check "$WORK/lx.nim" 2>&1)"
+grep -q 'tabs-not-allowed' <<<"$tout" || { echo "FAIL: leading tab should report tabs-not-allowed"; fail=1; }
+printf 'let\tx = 1\n' > "$WORK/lx.nim"
+grep -q 'tabs-not-allowed' <<<"$("$NP" check "$WORK/lx.nim" 2>&1)" || {
+  echo "FAIL: mid-line tab should report tabs-not-allowed"; fail=1; }
+# ...but a tab INSIDE a string literal is fine.
+printf 'let s = "a\tb"\n' > "$WORK/lx.nim"
+grep -q 'tabs-not-allowed' <<<"$("$NP" check "$WORK/lx.nim" 2>&1)" && {
+  echo "FAIL: tab inside a string must NOT be flagged"; fail=1; }
+# unterminated `#[` block comment.
+printf 'echo 1 #[ never closed\n' > "$WORK/lx.nim"
+grep -q 'unterminated-comment' <<<"$("$NP" check "$WORK/lx.nim" 2>&1)" || {
+  echo "FAIL: unterminated #[ should report unterminated-comment"; fail=1; }
+printf 'echo 1 #[ closed ]# more\n' > "$WORK/lx.nim"
+grep -q 'unterminated-comment' <<<"$("$NP" check "$WORK/lx.nim" 2>&1)" && {
+  echo "FAIL: a properly-closed block comment must be silent"; fail=1; }
+
 # (5) diagnostics are emitted in SOURCE ORDER (top-to-bottom), not validator order.
 printf 'let a = (1\nvar b = {2\n' > "$WORK/ord.nim"
 lines="$("$NP" check "$WORK/ord.nim" 2>&1)"
