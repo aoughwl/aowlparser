@@ -95,6 +95,34 @@ proc parseArg(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   if head.kind == tkKeyword and head.s == "for":
     ps.parseForExpr(b, lo, hi, pl, pc, bare = false)
     return
+  # `callee do: body` as a call/collection argument (`[quote do: owned(T), x]`):
+  # the paramless do-block collapses to `(call callee (stmts body))`, and the
+  # `do:` colon is NOT a `kv` separator. Bounded to this arg's range (`hi`), so a
+  # trailing sibling element after the comma is not swallowed by the body.
+  block doArg:
+    var d = 0
+    var doIdx = -1
+    var k = int(lo)
+    while k < int(hi):
+      let t = ps.tok(k)
+      if isOpenBracket(t.kind): inc d
+      elif isCloseBracket(t.kind):
+        if d > 0: dec d
+      elif d == 0 and t.kind == tkKeyword and t.s == "do":
+        doIdx = k; break
+      inc k
+    if doIdx > int(lo) and doIdx + 1 < int(hi) and ps.tok(doIdx + 1).kind == tkColon:
+      let anchor = ps.calleeAnchor(int(lo), doIdx)
+      let bt = ps.tok(doIdx + 2)
+      b.addTree "call"
+      ps.emitInfo(b, anchor.line, anchor.col, pl, pc, false)
+      ps.parseExprRange(b, lo, int32(doIdx), anchor.line, anchor.col)   # callee
+      b.addTree "stmts"
+      ps.emitInfo(b, bt.line, bt.col, anchor.line, anchor.col, false)
+      ps.parseExprRange(b, int32(doIdx) + 2, hi, bt.line, bt.col)       # body
+      b.endTree()   # stmts
+      b.endTree()   # call
+      return
   let guardKw = head.kind == tkKeyword and
                 (head.s == "if" or head.s == "when" or head.s == "case" or
                  head.s == "try" or head.s == "proc" or head.s == "func" or

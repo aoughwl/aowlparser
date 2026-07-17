@@ -274,6 +274,14 @@ proc emitBody(ps: var Parser; b: var Builder; colonIdx: int; refIndent: int32;
               kk.s == "except" or kk.s == "finally"):
           hi = k; break
         inc k
+    # A mid-line body whose line ENDS in a block-introducing `:` (`X: quote do:`
+    # / `foo:`) has its own body on the following deeper-indented lines — it is
+    # NOT a true one-liner. Extend the bound over that continuation so the nested
+    # colon-block statement is parsed whole (else its body leaks out as siblings).
+    if hi > bodyStart and ps.tok(hi - 1).kind == tkColon:
+      while ps.tok(hi).kind != tkEof and ps.tok(hi).indent >= 0 and
+            ps.tok(hi).indent > refIndent:
+        hi = ps.lineEnd(hi)
     while i < hi and ps.tok(i).kind != tkEof:
       i = ps.parseStmt(b, i, first.line, first.col, hi)
   else:
@@ -1179,9 +1187,26 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
   # postExprBlock: an expression statement whose line has a depth-0 `:` (not a
   # keyword statement) is `call/cmd(args): body` — parse the block as a trailing
   # `(stmts …)` arg. (Bounded to the head line; the block is on later lines.)
-  if hiLimit < 0:
-    let lineHi = ps.lineEnd(startIdx)
-    let pcolon = ps.depth0Colon(startIdx, lineHi)
+  let peLineHi = ps.lineEnd(startIdx)
+  let pePcolon = ps.depth0Colon(startIdx, peLineHi)
+  # A `do:` block (a depth-0 `do` before the colon) is an unambiguous
+  # postExprBlock even inside a BOUNDED one-line body (`insert(0): quote do: …`
+  # — the outer block's body is itself a `quote do:` statement), so allow it
+  # regardless of hiLimit; other bounded colons stay top-level-only.
+  var peHasDo = false
+  if pePcolon > startIdx:
+    var ped = 0
+    var pek = startIdx
+    while pek < pePcolon:
+      let pet = ps.tok(pek)
+      if isOpenBracket(pet.kind): inc ped
+      elif isCloseBracket(pet.kind):
+        if ped > 0: dec ped
+      elif ped == 0 and pet.kind == tkKeyword and pet.s == "do": peHasDo = true; break
+      inc pek
+  if hiLimit < 0 or peHasDo:
+    let lineHi = peLineHi
+    let pcolon = pePcolon
     # A depth-0 `:` in a non-keyword statement is a command/do-block body,
     # `foo a: body` / `x.build y: body` (inline or on following lines). Guard
     # against an assignment RHS (`x = …`).
