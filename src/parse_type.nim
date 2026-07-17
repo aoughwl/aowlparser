@@ -729,6 +729,13 @@ proc parseObjectCase(ps: var Parser; b: var Builder; caseIdx, defIndent: int;
     let bhi = ps.lineEnd(i)
     let bcolon = ps.findColon(i, bhi)
     if br.s == "of":
+      # an object-variant `of` needs a value before its ':' — same rule as a
+      # statement `case`. A colon directly after `of` leaves no match value.
+      if bcolon == i + 1:
+        let ct = ps.tok(bcolon)
+        ps.perrAt("of-without-value",
+          "'of' needs at least one value to match before its ':'",
+          ct.line, ct.col, fix = "put the branch value between 'of' and ':'")
       b.addTree "of"
       ps.emitInfo(b, br.line, br.col, kw.line, kw.col, false)
       b.addTree "ranges"

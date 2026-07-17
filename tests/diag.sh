@@ -331,6 +331,24 @@ for ok in 'type T = object\n  case k: bool\n  of true: x: int\n  of false: y: in
     echo "FAIL: valid '$ok' must be silent"; fail=1; }
 done
 
+# (4t) an `of` branch with no match value — a `:` directly after `of` (`of: x:`).
+# nifler says "expression expected, but found ':'"; we name the rule. Applies to
+# both statement `case` and object-variant `case`. Must NOT fire on normal
+# branches (`of 1:`, `of A, B:`) or an `else:`.
+printf 'case k\nof: 1:\n  discard\nelse: discard\n' > "$WORK/of.nim"
+grep -q 'of-without-value' <<<"$("$NP" check "$WORK/of.nim" 2>&1)" || {
+  echo "FAIL: statement 'of:' should be flagged"; fail=1; }
+printf 'type T = object\n  case k: bool\n  of: true: x: int\n  else: discard\n' > "$WORK/of.nim"
+grep -q 'of-without-value' <<<"$("$NP" check "$WORK/of.nim" 2>&1)" || {
+  echo "FAIL: variant 'of:' should be flagged"; fail=1; }
+for ok in 'case k\nof 1:\n  discard\nelse:\n  discard' \
+          'case k\nof 1, 2, 3: discard\nelse: discard' \
+          'type T = object\n  case k: bool\n  of true: x: int\n  else: discard'; do
+  printf "$ok\n" > "$WORK/of.nim"
+  grep -q 'of-without-value' <<<"$("$NP" check "$WORK/of.nim" 2>&1)" && {
+    echo "FAIL: valid '$ok' must be silent"; fail=1; }
+done
+
 # (5) diagnostics are emitted in SOURCE ORDER (top-to-bottom), not validator order.
 printf 'let a = (1\nvar b = {2\n' > "$WORK/ord.nim"
 lines="$("$NP" check "$WORK/ord.nim" 2>&1)"

@@ -430,6 +430,15 @@ proc parseCase(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int =
     let bhi = ps.lineEnd(i)
     let bcolon = ps.findColon(i, bhi)
     if br.s == "of":
+      # `of` must name at least one match value; a colon directly after it
+      # (`of: '+':`, or a bare `of:`) leaves no value. nifler reports "expression
+      # expected, but found ':'". An `of` with no colon at all on its line is a
+      # different malformed shape, left to the body logic.
+      if bcolon == i + 1:
+        let ct = ps.tok(bcolon)
+        ps.perrAt("of-without-value",
+          "'of' needs at least one value to match before its ':'",
+          ct.line, ct.col, fix = "put the branch value between 'of' and ':'")
       b.addTree "of"
       ps.emitInfo(b, br.line, br.col, kw.line, kw.col, false)
       b.addTree "ranges"   # ranges carries NO line-info
