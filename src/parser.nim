@@ -28,11 +28,15 @@ include parse_type
 include parse_stmt
 
 proc parseModule*(ps: var Parser; b: var Builder) =
-  # AIF header (see the main branch): emit our own `(.aif27)` magic rather than
-  # nifbuilder's `addHeader`, which hardcodes `(.nif27)`.
+  # AIF header. We emit our own `(.aif27)` magic rather than nifbuilder's
+  # `addHeader` (which hardcodes `(.nif27)`): aifparser's wire format is a
+  # deliberate rebrand of NIF, so the magic, vendor, and `.aif` extension all
+  # carry the AIF identity. The body grammar is otherwise identical, so the
+  # differential harness normalises the `(.aif27)`↔`(.nif27)` header line before
+  # comparing against the nifler oracle.
   b.addRaw "(.aif27)\n"
   b.addRaw "(.vendor "
-  b.addStrLit "aifparser"
+  b.addStrLit "aowlparser"
   b.addRaw ")\n"
   b.addRaw "(.dialect "
   b.addStrLit "nim-parsed"
@@ -52,6 +56,7 @@ proc parseModule*(ps: var Parser; b: var Builder) =
   ps.emitInfo(b, sl, sc, 0, 0, true)   # module stmts: absolute (first-token pos, file)
   var i = 0
   while ps.tok(i).kind != tkEof:
+    let before = i
     let t = ps.tok(i)
     if t.kind == tkKeyword and t.s == "type":
       # Top-level `type` sections route to parse_type.nim. (Nested type
@@ -63,4 +68,8 @@ proc parseModule*(ps: var Parser; b: var Builder) =
     # A trailing `##` doc comment (indented deeper than the top level) documents
     # the statement just parsed — nifler attaches it, so drop it here.
     i = ps.skipTrailingDoc(i, 0)
+    # Safety net for the "never hangs" contract: if a statement parser returned
+    # without consuming a token, force progress so a pathological construct
+    # surfaces as a (visible) structural mismatch instead of an infinite loop.
+    if i <= before: i = before + 1
   b.endTree()

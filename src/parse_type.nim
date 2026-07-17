@@ -12,11 +12,15 @@
 proc parseTypeRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
 proc parseProcType(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
 proc parseTupleInline(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
-proc parseParams(ps: var Parser; b: var Builder; lpIdx: int; pl, pc: int32): int
-proc parsePragmas(ps: var Parser; b: var Builder; braceIdx: int; pl, pc: int32): int
+proc parseParams(ps: var Parser; b: var Builder; lpIdx: int; pl, pc: int32;
+                 colonIsReturn: bool = true): int
+# parsePragmas is forward-declared in parsecore.nim (needed by parse_expr too).
 proc parseGenerics(ps: var Parser; b: var Builder; lbIdx: int; pl, pc: int32): int
 proc parseObject(ps: var Parser; b: var Builder; objIdx, defIndent: int; pl, pc: int32): int
+proc parseObjectCase(ps: var Parser; b: var Builder; caseIdx, defIndent: int; kl, kc: int32): int
+proc parseObjectWhen(ps: var Parser; b: var Builder; whenIdx, defIndent: int; kl, kc: int32): int
 proc parseEnum(ps: var Parser; b: var Builder; enumIdx, defIndent: int; pl, pc: int32): int
+proc parseTupleBody(ps: var Parser; b: var Builder; tupIdx, defIndent: int; pl, pc: int32): int
 proc parseTypeDef(ps: var Parser; b: var Builder; nameIdx, typeKwCol: int; pl, pc: int32): int
 
 # --- helpers -----------------------------------------------------------------
@@ -37,14 +41,31 @@ proc typeExprEnd(ps: var Parser; lo: int): int =
   ## default that follows is dropped.
   let procType = ps.tok(lo).kind == tkKeyword and
                  (ps.tok(lo).s == "proc" or ps.tok(lo).s == "iterator")
-  var retPending = false          # proc param parens closed; the next `:` is the return
+  var retPending = procType and ps.tok(lo + 1).kind == tkColon
+                                  # a param-LESS `iterator: T` / `proc: T`: the very
+                                  # next `:` is already the return colon
+  var inProcReturn = false        # past the proc return `:`, scanning its type — which
+                                  # may wrap onto a continuation line inside the param
+                                  # parens (`cb: proc(r): \n  Future[void]`).
   var depth = 0
   var i = lo
   let startLine = ps.tok(lo).line
   while ps.tok(i).kind != tkEof:
     let t = ps.tok(i)
     if depth == 0 and t.kind == tkCurlyLe:
-      break                       # depth-0 '{' starts a pragma → ends the type
+      # A proc/iterator TYPE owns a SAME-LINE trailing `{.pragma.}` (`proc (x): T
+      # {.noconv.}`) — consume it into the type so the enclosing routine does not
+      # re-grab it as its OWN pragma. A pragma on a CONTINUATION line (object proc
+      # fields) is left to the caller's own multi-line handling. Any other depth-0
+      # `{` starts a pragma that ends the type.
+      if procType and ps.tok(i + 1).kind == tkDot and t.line == ps.tok(i - 1).line:
+        # the proc type ENDS right after its trailing pragma — return directly, do
+        # NOT keep scanning (a proc with a return has `inProcReturn` set, which
+        # would otherwise disable the newline-break guard and over-run onto the
+        # next field/line).
+        return ps.matchClose(i) + 1
+      else:
+        break
     elif isOpenBracket(t.kind):
       inc depth
     elif isCloseBracket(t.kind):
@@ -54,11 +75,12 @@ proc typeExprEnd(ps: var Parser; lo: int): int =
     elif depth == 0:
       if t.kind == tkColon and retPending:
         retPending = false        # consume the proc return colon, keep scanning
+        inProcReturn = true
       elif t.kind == tkComma or t.kind == tkSemicolon or t.kind == tkColon:
         break
       elif t.kind == tkOperator and t.s == "=":
         break
-      elif t.line != startLine and t.indent >= 0:
+      elif t.line != startLine and t.indent >= 0 and not inProcReturn:
         break
     inc i
   result = i
@@ -71,25 +93,101 @@ proc parseTypeRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
     b.addEmpty
     return
   let first = ps.tok(int(lo))
+  # A top-level binary operator (`T | U`, or infix `ptr`/`ref`) splits FIRST —
+  # BEFORE the prefix keyword AND the tuple/object/proc keyword forms — so
+  # `tuple | object` is `(infix | (tuple) (object))` and `ref | ptr` is
+  # `(infix | (ref) (ptr))`, not a prefix `ref` that swallows `| ptr`. A leading
+  # prefix keyword can never itself be the split point (findSplit needs i > lo).
+  block:
+    let sp0 = ps.findSplit(int(lo), int(hi), typeCtx = true)
+    if sp0 >= 0:
+      let op = ps.tok(sp0)
+      b.addTree "infix"
+      ps.emitInfo(b, op.line, op.col, pl, pc, false)
+      b.addIdent op.s
+      ps.emitInfo(b, op.line, op.col, op.line, op.col, false)
+      parseTypeRange(ps, b, lo, int32(sp0), op.line, op.col)
+      parseTypeRange(ps, b, int32(sp0) + 1, hi, op.line, op.col)
+      b.endTree()
+      return
   # prefix type keywords: ref/ptr/var(->mut)/out/distinct/static
   if first.kind == tkKeyword and isPrefixTypeKw(first.s):
     b.addTree prefixTypeTag(first.s)
     ps.emitInfo(b, first.line, first.col, pl, pc, false)
-    parseTypeRange(ps, b, lo + 1, hi, first.line, first.col)
+    # a BARE keyword with no operand (`ptr` alone, e.g. `nil (ptr)`) → `(ptr)`
+    # with no child; nifler emits an empty node, not `(ptr .)`.
+    if int(lo) + 1 < int(hi):
+      parseTypeRange(ps, b, lo + 1, hi, first.line, first.col)
     b.endTree()
     return
   # proc / iterator type
   if first.kind == tkKeyword and (first.s == "proc" or first.s == "iterator"):
     parseProcType(ps, b, lo, hi, pl, pc)
     return
+  # lone `nil` type → `(nil)`. (A `nil <arg>` typed-nil, e.g. `nil pointer`, is a
+  # type-context command and is handled by the command block below, which emits
+  # this `(nil)` as its callee.)
+  if first.kind == tkKeyword and first.s == "nil" and int(lo) + 1 == int(hi):
+    b.addTree "nil"
+    ps.emitInfo(b, first.line, first.col, pl, pc, false)
+    b.endTree()
+    return
   # inline tuple type
   if first.kind == tkKeyword and first.s == "tuple":
     parseTupleInline(ps, b, lo, hi, pl, pc)
     return
+  # bare `object` type keyword (empty, e.g. the rhs of `int | object`) → `(object)`
+  # with NO children — distinct from a type-def `= object` which is `(object .)`.
+  if first.kind == tkKeyword and first.s == "object" and int(lo) + 1 == int(hi):
+    b.addTree "object"
+    ps.emitInfo(b, first.line, first.col, pl, pc, false)
+    b.endTree()
+    ps.section = "fld"   # nkObjectTy leaks FldL into nifler's section state
+    return
   # parenthesized anonymous tuple type: `(string, int)` → `(tup string int)`,
-  # `(line: int32, col: int32)` → `(tup (kv line int32) …)`.
+  # `(line: int32, col: int32)` → `(tup (kv line int32) …)`. A SINGLE grouped
+  # element with no `,`/`:` is a grouping paren, not a tuple → `(par x)`
+  # (e.g. `nil (ptr)` = `(cmd (nil) (par (ptr)))`).
   if first.kind == tkParLe and ps.matchClose(int(lo)) == int(hi) - 1:
     let rb = int(hi) - 1
+    # A control-flow EXPRESSION as the paren body — `(when C: T1 else: T2)` in a
+    # type RHS — is `(par (when …))`, not a tuple: the branch colons are the
+    # when/if/case syntax, not `field: T` separators. Parse it via the expression
+    # forms (spliced before this file), with bare branch bodies like nifler.
+    let inner = ps.tok(int(lo) + 1)
+    if inner.kind == tkKeyword and
+       (inner.s == "when" or inner.s == "if" or inner.s == "case" or inner.s == "try"):
+      b.addTree "par"
+      ps.emitInfo(b, first.line, first.col, pl, pc, false)
+      case inner.s
+      of "when": ps.parseIfExpr(b, int32(int(lo) + 1), int32(rb), first.line, first.col, false, "when")
+      of "if": ps.parseIfExpr(b, int32(int(lo) + 1), int32(rb), first.line, first.col, false, "if")
+      of "case": ps.parseCaseExpr(b, int32(int(lo) + 1), int32(rb), first.line, first.col)
+      else: ps.parseTryExpr(b, int32(int(lo) + 1), int32(rb), first.line, first.col)
+      b.endTree()
+      return
+    let elems0 = ps.splitArgs(int(lo) + 1, rb)
+    # A single grouped element wrapped in parens is `(par x)`, not a tuple. This
+    # includes a parenthesized PROC/ITERATOR type (`(proc(s: string): int)` as a
+    # return type): its `:` is the routine's return colon, NOT a `field: T` tuple
+    # separator, so the depth-0-colon test alone would wrongly route it to `tup`.
+    let inner0 = if elems0.len == 1: ps.tok(elems0[0]) else: first
+    let inner0Proc = inner0.kind == tkKeyword and
+                     (inner0.s == "proc" or inner0.s == "iterator")
+    if elems0.len == 1 and elems0[0] < rb and
+       (ps.depth0Colon(elems0[0], rb) < 0 or inner0Proc):
+      b.addTree "par"
+      ps.emitInfo(b, first.line, first.col, pl, pc, false)
+      parseTypeRange(ps, b, int32(elems0[0]), int32(rb), first.line, first.col)
+      b.endTree()
+      return
+    # An EMPTY `()` in type position is `(par)`, not an empty tuple — e.g. the
+    # parameter list of a `->` proc-type sugar (`() -> string`) or a bare `()`.
+    if int(lo) + 1 == rb:
+      b.addTree "par"
+      ps.emitInfo(b, first.line, first.col, pl, pc, false)
+      b.endTree()
+      return
     b.addTree "tup"
     ps.emitInfo(b, first.line, first.col, pl, pc, false)
     let elems = ps.splitArgs(int(lo) + 1, rb)
@@ -110,18 +208,7 @@ proc parseTypeRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
         parseTypeRange(ps, b, int32(eLo), int32(eHi), first.line, first.col)
     b.endTree()
     return
-  # top-level binary operator (e.g. `T | U`) → infix
-  let sp = ps.findSplit(int(lo), int(hi))
-  if sp >= 0:
-    let op = ps.tok(sp)
-    b.addTree "infix"
-    ps.emitInfo(b, op.line, op.col, pl, pc, false)
-    b.addIdent op.s
-    ps.emitInfo(b, op.line, op.col, op.line, op.col, false)
-    parseTypeRange(ps, b, lo, int32(sp), op.line, op.col)
-    parseTypeRange(ps, b, int32(sp) + 1, hi, op.line, op.col)
-    b.endTree()
-    return
+  # (top-level infix `T | U` / `ptr`/`ref` handled above, before the keyword forms)
   # command in type position: `lent string`, `sink T`, `owned Foo` → `(cmd lent
   # string)`. Must precede the postfix `[]`/`.` checks so `sink seq[string]`
   # binds as `sink (seq[string])`, not `(sink seq)[string]` — a leading modifier
@@ -129,7 +216,14 @@ proc parseTypeRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   # `seq[string]` (adjacent `[`) keeps the bracket in the callee (ce == hi).
   block:
     let ce = ps.cmdCalleeEnd(int(lo), int(hi))
-    if ps.tok(int(lo)).kind == tkIdent and ce < int(hi) and ps.startsArg(ce, int(hi)):
+    # callee is a bare ident (`sink T`, `lent T` — these are non-keyword idents),
+    # or one of the keyword type modifiers `static T` / `type T` (`(cmd static
+    # bool)`), or the `nil` keyword (`nil pointer` = `(cmd (nil) pointer)`).
+    let c0 = ps.tok(int(lo))
+    let cmdCalleeOk = c0.kind == tkIdent or
+                      (c0.kind == tkKeyword and
+                       (c0.s == "nil" or c0.s == "static" or c0.s == "type"))
+    if cmdCalleeOk and ce < int(hi) and ps.startsArg(ce, int(hi)):
       # A command in TYPE position (`lent T`, `sink seq[int]`) is an
       # expression-context command: nkCommand.info = the FIRST ARGUMENT, so the
       # callee gets a negative delta back (like parse_expr's value commands).
@@ -198,6 +292,23 @@ proc parseTypeRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   # — which the expression emitter renders correctly (an int must not be
   # `addIdent`-escaped to `\34`, a call must keep its arguments).
   let t = ps.tok(int(lo))
+  # A type constructor applied to a PROC/ITERATOR type — `owned(proc (…) {.….})`,
+  # `sink(iterator …)` — is a call in type position whose argument is itself a
+  # type. The generic expression fallthrough would parse that argument as a
+  # routine LITERAL (`(proc …)`), not a `(proctype …)`, so route it through the
+  # type parser: `(call owned (proctype …))`.
+  if (t.kind == tkIdent or t.kind == tkKeyword) and int(lo) + 2 < int(hi) and
+     ps.tok(int(lo) + 1).kind == tkParLe and
+     ps.matchClose(int(lo) + 1) == int(hi) - 1 and
+     ps.tok(int(lo) + 2).kind == tkKeyword and
+     (ps.tok(int(lo) + 2).s == "proc" or ps.tok(int(lo) + 2).s == "iterator"):
+    let rb = int(hi) - 1
+    b.addTree "call"
+    ps.emitInfo(b, t.line, t.col, pl, pc, false)
+    ps.emitName(b, t, t.line, t.col)                                  # callee
+    parseTypeRange(ps, b, int32(int(lo) + 2), int32(rb), t.line, t.col)  # proc-type arg
+    b.endTree()
+    return
   if int(lo) + 1 >= int(hi) and (t.kind == tkIdent or t.kind == tkKeyword):
     ps.emitName(b, t, pl, pc)
   else:
@@ -261,8 +372,7 @@ proc parseTupleInline(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
         # (relLineInfo(def[j], parent) — not the tuple node), so the kv's parent
         # anchor is (pl, pc), the position passed in for the tuple itself.
         ps.emitInfo(b, nm.line, nm.col, pl, pc, false)
-        b.addIdent nm.s
-        ps.emitInfo(b, nm.line, nm.col, nm.line, nm.col, false)
+        ps.emitName(b, nm, nm.line, nm.col)   # field name, or `(quoted <kw>)`
         if tLo >= 0:
           parseTypeRange(ps, b, int32(tLo), int32(tHi), nm.line, nm.col)
         else:
@@ -291,9 +401,32 @@ proc parseProcType(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
     else:
       b.addEmpty                                            # pragmas
     b.addEmpty 2                                            # exceptions, body
-  else:
+  elif int(lo) + 1 < int(hi) and ps.tok(int(lo) + 1).kind == tkCurlyLe:
+    # a bare `proc`/`iterator` type WITH a trailing `{.pragma.}` (no params):
+    # `iterator {.closure.}` → `(itertype .... . (pragmas closure) ..)` — 4 empties,
+    # an empty params slot (no return), the pragmas, then exceptions+body.
     ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
-    b.addEmpty 8
+    b.addEmpty 4                                           # name export pattern generics
+    b.addEmpty                                             # params slot (no return)
+    discard ps.parsePragmas(b, int(lo) + 1, kw.line, kw.col)
+    b.addEmpty 2                                           # exceptions, body
+  elif int(lo) + 1 < int(hi) and ps.tok(int(lo) + 1).kind == tkColon:
+    # a param-less `proc`/`iterator` type WITH a return: `iterator: T` →
+    # `(itertype .... (params) T . ..)` — 4 empties, an EMPTY (params) node, the
+    # return type, then pragmas + exceptions + body.
+    ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
+    b.addEmpty 4                                           # name export pattern generics
+    b.addTree "params"; ps.emitInfo(b, kw.line, kw.col, kw.line, kw.col, false); b.endTree()
+    var i = ps.parseType(b, int(lo) + 2, kw.line, kw.col)  # return type
+    if ps.tok(i).kind == tkCurlyLe:
+      i = ps.parsePragmas(b, i, kw.line, kw.col)
+    else:
+      b.addEmpty                                           # pragmas
+    b.addEmpty 2                                           # exceptions, body
+  else:
+    # a BARE `proc`/`iterator` type (`(proc)`, no params) → `(proctype)` with no
+    # children — nifler emits an empty node, not 8 empty slots.
+    ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
   b.endTree()
 
 # --- pragmas -----------------------------------------------------------------
@@ -318,12 +451,30 @@ proc parsePragmas(ps: var Parser; b: var Builder; braceIdx: int; pl, pc: int32):
        nxt.kind == tkStrLit or nxt.kind == tkIntLit or nxt.kind == tkFloatLit:
       ps.emitName(b, ps.tok(lo), brace.line, brace.col)
       inc lo
-  let starts = ps.splitArgs(lo, hi)
+  let starts = ps.splitPragmaItems(lo, hi)
   for ai in 0 ..< starts.len:
     let aLo = starts[ai]
-    let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: hi
+    # a comma-terminated item excludes the comma; a newline-separated one (no
+    # comma before the next start) keeps every token up to that next start.
+    let aHi = if ai + 1 < starts.len:
+                (if ps.tok(starts[ai+1] - 1).kind == tkComma: starts[ai+1] - 1
+                 else: starts[ai+1])
+              else: hi
     if aLo < aHi:
-      ps.parseArg(b, int32(aLo), int32(aHi), brace.line, brace.col)
+      # `cast` pragma: `{.cast(noSideEffect).}` is NOT a call — nifler emits
+      # `(cast . <expr>)` (empty type slot, the pragma expr as the value).
+      let t0 = ps.tok(aLo)
+      if t0.kind == tkKeyword and t0.s == "cast" and
+         aLo + 1 < aHi and ps.tok(aLo + 1).kind == tkParLe and
+         ps.matchClose(aLo + 1) == aHi - 1:
+        let rp = aHi - 1
+        b.addTree "cast"
+        ps.emitInfo(b, t0.line, t0.col, brace.line, brace.col, false)
+        b.addEmpty                                    # empty target-type slot
+        ps.parseArg(b, int32(aLo + 2), int32(rp), t0.line, t0.col)
+        b.endTree()
+      else:
+        ps.parseArg(b, int32(aLo), int32(aHi), brace.line, brace.col)
   b.endTree()
   result = rb + 1
 
@@ -343,7 +494,10 @@ proc emitTypevarGroup(ps: var Parser; b: var Builder; gLo, gHi: int;
   if ci < gHi and ps.tok(ci).kind == tkColon:
     cLo = ci + 1
   for nm in names:
-    b.addTree "typevar"
+    # nifler's un-scoped section state: a constraint containing `object`/`tuple`
+    # leaks `fld` into ps.section, so the NEXT typevar is tagged `fld` not
+    # `typevar` (see `iterator fields[S: tuple|object, T: tuple|object]`).
+    b.addTree ps.section
     ps.emitInfo(b, nm.line, nm.col, tvL, tvC, false)        # typevar node = name pos
     ps.emitName(b, nm, nm.line, nm.col)   # typevar name, or `(quoted …)`
     b.addEmpty                                              # export (always .)
@@ -362,6 +516,7 @@ proc parseGenerics(ps: var Parser; b: var Builder; lbIdx: int; pl, pc: int32): i
   let rb = ps.matchClose(lbIdx)
   b.addTree "typevars"
   ps.emitInfo(b, lb.line, lb.col, pl, pc, false)           # typevars node = '[' pos
+  ps.section = "typevar"   # fresh; constraints may leak `fld`/`param` onward
   # Split into param groups on `;`, and on a `,` that follows a depth-0 `:`
   # constraint (`[T: A, L: B]` = two params) — a `,` BEFORE any `:` builds a
   # shared-constraint name list (`[T, U: C]` = one group).
@@ -464,7 +619,10 @@ proc emitFieldLine(ps: var Parser; b: var Builder; fi, lineHi: int;
       if firstPragLo >= 0: ps.tok(firstPragLo).col
       elif exports[ni]: nm.endCol
       else: nm.col
-    b.addTree "fld"
+    # Field tag reads nifler's `c.section`: normally FldL, but a proc-type field
+    # in an earlier variant branch leaks ParamL into later branch fields.
+    let ftag = if ps.section.len > 0: ps.section else: "fld"
+    b.addTree ftag
     ps.emitInfo(b, nm.line, aCol, kl, kc, false)
     ps.emitName(b, nm, nm.line, aCol)   # field name atom, or `(quoted …)`
     if exports[ni]: b.addRaw " x" else: b.addEmpty
@@ -497,6 +655,13 @@ proc emitFieldBody(ps: var Parser; b: var Builder; colonIdx, defIndent: int;
     var i = bodyStart
     while ps.tok(i).kind != tkEof and ps.tok(i).indent > int32(defIndent):
       if ps.tok(i).kind == tkComment: inc i; continue
+      # A branch body is itself an object-field list, so it can nest `case`/`when`
+      # groups (e.g. `when A: x; when B: y`) — dispatch them like parseObject does,
+      # not as flat field lines (which would drop them).
+      if ps.tok(i).kind == tkKeyword and ps.tok(i).s == "case":
+        i = ps.parseObjectCase(b, i, defIndent, first.line, first.col); continue
+      if ps.tok(i).kind == tkKeyword and ps.tok(i).s == "when":
+        i = ps.parseObjectWhen(b, i, defIndent, first.line, first.col); continue
       let lh = ps.lineEnd(i)
       ps.emitFieldLine(b, i, lh, first.line, first.col)
       i = lh
@@ -509,9 +674,17 @@ proc parseObjectCase(ps: var Parser; b: var Builder; caseIdx, defIndent: int;
   let kw = ps.tok(caseIdx)
   b.addTree "case"
   ps.emitInfo(b, kw.line, kw.col, kl, kc, false)
-  # discriminator field on the case line: `case name: Type`
+  # discriminator field on the case line: `case name: Type`. A discriminator-LESS
+  # `case` (nimony's enum variant: bare `case` then `of`) still gets a field node
+  # with a synthesized `???` name and all-empty slots, matching nifler.
   let caseHi = ps.lineEnd(caseIdx)
-  ps.emitFieldLine(b, caseIdx + 1, caseHi, kw.line, kw.col)
+  if caseIdx + 1 < caseHi:
+    ps.emitFieldLine(b, caseIdx + 1, caseHi, kw.line, kw.col)
+  else:
+    b.addTree "fld"
+    ps.emitInfo(b, kw.line, kw.col, kw.line, kw.col, false)
+    b.addEmpty; b.addEmpty; b.addEmpty; b.addEmpty; b.addEmpty
+    b.endTree()
   var i = caseHi
   let refIndent = kw.col
   while ps.tok(i).kind != tkEof and ps.tok(i).indent >= int32(refIndent) and
@@ -550,8 +723,12 @@ proc parseObjectWhen(ps: var Parser; b: var Builder; whenIdx, defIndent: int;
   ps.emitInfo(b, kw.line, kw.col, kl, kc, false)
   var i = whenIdx
   let refIndent = kw.col
+  # Only the FIRST branch is `when`; after that, a `when` at the same indent is a
+  # SEPARATE conditional-field group (an object body can hold several), NOT a
+  # branch of this one — accepting it here would absorb the sibling `when`/`else`.
   while ps.tok(i).kind == tkKeyword and ps.tok(i).indent >= int32(refIndent) and
-        (ps.tok(i).s == "when" or ps.tok(i).s == "elif" or ps.tok(i).s == "else"):
+        ((i == whenIdx and ps.tok(i).s == "when") or
+         ps.tok(i).s == "elif" or ps.tok(i).s == "else"):
     let br = ps.tok(i)
     let bhi = ps.lineEnd(i)
     let bcolon = ps.findColon(i, bhi)
@@ -579,6 +756,7 @@ proc parseObject(ps: var Parser; b: var Builder; objIdx, defIndent: int;
   let kw = ps.tok(objIdx)
   b.addTree "object"
   ps.emitInfo(b, kw.line, kw.col, pl, pc, false)           # object node = keyword pos
+  ps.section = "fld"                                        # nkObjectTy sets FldL
   let objLineEnd = ps.lineEnd(objIdx)
   # inheritance: `of Parent`
   var i = objIdx + 1
@@ -597,6 +775,10 @@ proc parseObject(ps: var Parser; b: var Builder; objIdx, defIndent: int;
   while ps.tok(fi).kind != tkEof and ps.tok(fi).indent > int32(defIndent):
     if ps.tok(fi).kind == tkComment:      # doc comment in object body: dropped
       inc fi; continue
+    # nifler resets `c.section = FldL` before EACH direct recList child, so a
+    # top-level field never inherits a leaked `param` — only fields NESTED in a
+    # when/case branch do.
+    ps.section = "fld"
     if ps.tok(fi).kind == tkKeyword and ps.tok(fi).s == "case":
       fi = ps.parseObjectCase(b, fi, defIndent, kw.line, kw.col)
       continue
@@ -690,14 +872,29 @@ proc parseConcept(ps: var Parser; b: var Builder; conceptIdx, defIndent: int;
   b.addTree "concept"
   ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
   let hi = ps.lineEnd(conceptIdx)
-  # params: whatever follows `concept` on its line → (stmts …)
-  b.addTree "stmts"
-  let pfirst = ps.tok(conceptIdx + 1)
-  ps.emitInfo(b, pfirst.line, pfirst.col, kw.line, kw.col, false)
-  var pi = conceptIdx + 1
-  while pi < hi and ps.tok(pi).kind != tkEof:
-    pi = ps.parseStmt(b, pi, pfirst.line, pfirst.col, hi)
-  b.endTree()   # params
+  # refinement params: whatever follows `concept` ON ITS OWN LINE → (stmts …).
+  # A bare `concept` (nothing before the newline) has NO params — nifler emits `.`
+  # there, not an empty `(stmts)`.
+  if conceptIdx + 1 < hi:
+    b.addTree "stmts"
+    let pfirst = ps.tok(conceptIdx + 1)
+    ps.emitInfo(b, pfirst.line, pfirst.col, kw.line, kw.col, false)
+    # comma-separated refinement params: `a, type T` → `a` and `(typeof T)`.
+    let starts = ps.splitArgs(conceptIdx + 1, hi)
+    for ai in 0 ..< starts.len:
+      let pLo = starts[ai]
+      let pHi = if ai + 1 < starts.len: starts[ai + 1] - 1 else: hi
+      let pt = ps.tok(pLo)
+      if pt.kind == tkKeyword and pt.s == "type" and pLo + 1 < pHi:
+        b.addTree "typeof"
+        ps.emitInfo(b, pt.line, pt.col, pfirst.line, pfirst.col, false)
+        ps.parseExprRange(b, int32(pLo + 1), int32(pHi), pt.line, pt.col)
+        b.endTree()
+      else:
+        ps.parseExprRange(b, int32(pLo), int32(pHi), pfirst.line, pfirst.col)
+    b.endTree()   # params
+  else:
+    b.addEmpty
   b.addEmpty
   b.addEmpty
   # body: deeper-indented statements, else empty
@@ -716,6 +913,43 @@ proc parseConcept(ps: var Parser; b: var Builder; conceptIdx, defIndent: int;
     result = hi
   b.endTree()   # concept
 
+proc parseTupleBody(ps: var Parser; b: var Builder; tupIdx, defIndent: int;
+                    pl, pc: int32): int =
+  ## Indented tuple type `type X = tuple⏎  a: int⏎  b: string` →
+  ## `(tuple (kv a int) (kv b string))`. The fields are on lines indented deeper
+  ## than the def (like an object body), NOT in `[ ]`.
+  let kw = ps.tok(tupIdx)
+  b.addTree "tuple"
+  ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
+  var fi = ps.lineEnd(tupIdx)
+  while ps.tok(fi).kind != tkEof and ps.tok(fi).indent > int32(defIndent):
+    if ps.tok(fi).kind == tkComment: inc fi; continue
+    let lineHi = ps.lineEnd(fi)
+    # `name (, name)* : type` — a shared type duplicated into each kv.
+    var names: seq[Token] = @[]
+    var i = fi
+    while i < lineHi and (ps.tok(i).kind == tkIdent or ps.tok(i).kind == tkKeyword):
+      names.add ps.tok(i)
+      inc i
+      if i < lineHi and ps.tok(i).kind == tkComma: inc i
+      else: break
+    var tLo = -1
+    var tHi = lineHi
+    if i < lineHi and ps.tok(i).kind == tkColon:
+      tLo = i + 1
+    for nm in names:
+      b.addTree "kv"
+      ps.emitInfo(b, nm.line, nm.col, pl, pc, false)
+      ps.emitName(b, nm, nm.line, nm.col)
+      if tLo >= 0:
+        parseTypeRange(ps, b, int32(tLo), int32(tHi), nm.line, nm.col)
+      else:
+        b.addEmpty
+      b.endTree()
+    fi = if lineHi > fi: lineHi else: fi + 1
+  b.endTree()
+  result = fi
+
 proc parseTypeDef(ps: var Parser; b: var Builder; nameIdx, typeKwCol: int;
                   pl, pc: int32): int =
   ## Emit one `(type name export generics pragma rhs...)`. Returns index after
@@ -731,6 +965,13 @@ proc parseTypeDef(ps: var Parser; b: var Builder; nameIdx, typeKwCol: int;
   if i < ps.toks.len and ps.tok(i).kind == tkBracketLe:
     genIdx = i
     i = ps.matchClose(i) + 1
+  # a pragma AFTER the generics (`Name*[T] {.magic.}`): splitFieldName only sees a
+  # pragma directly after the name (before `[T]`), so capture a post-generics one.
+  if pragLo < 0 and i < ps.toks.len and ps.tok(i).kind == tkCurlyLe and
+     i + 1 < ps.toks.len and ps.tok(i + 1).kind == tkDot:
+    pragLo = i
+    pragHi = ps.matchClose(i) + 1
+    i = pragHi
   # the `=`
   var eqIdx = -1
   block:
@@ -766,6 +1007,11 @@ proc parseTypeDef(ps: var Parser; b: var Builder; nameIdx, typeKwCol: int;
       resultIdx = ps.parseEnum(b, rhsIdx, defIndent, eqTok.line, eqTok.col)
     elif r.kind == tkKeyword and r.s == "concept":
       resultIdx = ps.parseConcept(b, rhsIdx, defIndent, eqTok.line, eqTok.col)
+    elif r.kind == tkKeyword and r.s == "tuple" and
+         ps.tok(rhsIdx + 1).kind != tkBracketLe and
+         ps.tok(rhsIdx + 1).indent > int32(defIndent):
+      # indented `= tuple⏎  a: T` body (no `[ ]`) — fields on deeper lines
+      resultIdx = ps.parseTupleBody(b, rhsIdx, defIndent, eqTok.line, eqTok.col)
     elif r.kind == tkKeyword and (r.s == "ref" or r.s == "ptr") and
          ps.tok(rhsIdx + 1).kind == tkKeyword and ps.tok(rhsIdx + 1).s == "object":
       b.addTree r.s
@@ -773,7 +1019,13 @@ proc parseTypeDef(ps: var Parser; b: var Builder; nameIdx, typeKwCol: int;
       resultIdx = ps.parseObject(b, rhsIdx + 1, defIndent, r.line, r.col)
       b.endTree()
     else:
-      let hi = ps.lineEnd(rhsIdx)   # section RHS spans the whole (balanced) line
+      var hi = ps.lineEnd(rhsIdx)   # section RHS spans the whole (balanced) line
+      # A multi-line RHS (e.g. a proc type whose return type / pragmas sit on a
+      # deeper-indented continuation line, `proc (…):⏎  RetT {.closure.}`) extends
+      # past this line. Absorb every following line indented deeper than the def so
+      # the continuation isn't re-parsed as a spurious sibling type member.
+      while ps.tok(hi).kind != tkEof and ps.tok(hi).indent > int32(defIndent):
+        hi = ps.lineEnd(hi)
       parseTypeRange(ps, b, int32(rhsIdx), int32(hi), eqTok.line, eqTok.col)
       resultIdx = hi
   else:
@@ -793,23 +1045,43 @@ proc parseTypeSection(ps: var Parser; b: var Builder; kwIdx: int;
   else:
     # indented block of defs
     var j = i
+    let memberIndent = ps.tok(i).indent   # column of the section's type defs
     while ps.tok(j).kind != tkEof and ps.tok(j).indent > int32(typeKwCol):
-      if ps.tok(j).kind == tkComment:     # doc comment between type defs: dropped
+      if ps.tok(j).kind == tkComment:
+        # A comment AT the member indent is a standalone member → a sibling
+        # `(comment)` (mirrors parseSection); a DEEPER comment is the trailing
+        # doc of the preceding def and is dropped.
+        if ps.tok(j).indent == memberIndent:
+          let ct = ps.tok(j)
+          b.addTree "comment"
+          ps.emitInfo(b, ct.line, ct.col, pl, pc, false)
+          b.endTree()
         inc j; continue
       j = ps.parseTypeDef(b, j, typeKwCol, pl, pc)
     result = j
 
 # --- params & routines -------------------------------------------------------
 
-proc parseParams(ps: var Parser; b: var Builder; lpIdx: int; pl, pc: int32): int =
+proc parseParams(ps: var Parser; b: var Builder; lpIdx: int; pl, pc: int32;
+                 colonIsReturn: bool = true): int =
   ## Emit `(params ...)` then the return type as a sibling. `lpIdx` is `(`.
   ## Returns index after the return type (or after `)` if none).
+  ## `colonIsReturn=false` for a `do` block: Nim's do-grammar takes a return
+  ## type only via `->`, so the `:` after the params is the BODY colon, not a
+  ## return type — consuming it as one parses the body as a type (`do(): if …`
+  ## sends parseType into infinite recursion).
   let lp = ps.tok(lpIdx)
   let rpIdx = ps.matchClose(lpIdx)
+  # nifler's nkFormalParams sets `c.section = ParamL` unconditionally and never
+  # restores it; a following var/let/const section item then inherits `param`.
+  ps.section = "param"
   b.addTree "params"
   ps.emitInfo(b, lp.line, lp.col, pl, pc, false)           # params node = '(' pos
   var i = lpIdx + 1
   while i < rpIdx:
+    let iGroupStart = i   # never-hang guard: force progress if a malformed group
+                          # (e.g. a stray token the arms below don't consume) leaves
+                          # `i` unchanged for a whole iteration.
     # collect a group of names up to ':'
     var names: seq[Token] = @[]
     var exports: seq[bool] = @[]
@@ -872,11 +1144,12 @@ proc parseParams(ps: var Parser; b: var Builder; lpIdx: int; pl, pc: int32): int
       b.endTree()
     if i < rpIdx and (ps.tok(i).kind == tkComma or ps.tok(i).kind == tkSemicolon):
       inc i
+    if i == iGroupStart: inc i   # never-hang guard: guarantee forward progress
   b.endTree()  # close params
   # return type sibling — introduced by `:` (proc/param types) or `->` (`do`
   # blocks, `sort do (a, b) -> int:`).
   var j = rpIdx + 1
-  if ps.tok(j).kind == tkColon or
+  if (colonIsReturn and ps.tok(j).kind == tkColon) or
      (ps.tok(j).kind == tkOperator and ps.tok(j).s == "->"):
     inc j
     j = ps.parseType(b, j, lp.line, lp.col)                 # ret parent = params node
@@ -885,8 +1158,51 @@ proc parseParams(ps: var Parser; b: var Builder; lpIdx: int; pl, pc: int32): int
   result = j
 
 proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
-                  tag: string): int =
+                  tag: string; hiBound: int = -1): int =
+  ## `hiBound` (>= 0) caps the body: an ANONYMOUS routine used as an expression
+  ## (`f(proc(): int = b)`) must not let its one-line `= body` read past the
+  ## enclosing call argument — otherwise it swallows the closing `)` and any
+  ## trailing block `:` on the same physical line, and the caller loops forever.
   let kw = ps.tok(kwIdx)
+  # Bare `proc`/`func`/`iterator` with nothing to parse (next token closes the
+  # enclosing bracket, is a comma, or is at/beyond the body bound) is a proc TYPE,
+  # not a routine: `(proc)` in an expression is `(par (proctype))`. Emitting it as
+  # a named routine would read `)` as the name and the trailing `:` body as a
+  # return type, running past the paren and recursing on the body (a crash).
+  block:
+    let after = ps.tok(kwIdx + 1)
+    if after.kind == tkEof or isCloseBracket(after.kind) or after.kind == tkComma or
+       (hiBound >= 0 and kwIdx + 1 >= hiBound):
+      b.addTree(if tag == "iterator": "itertype" else: "proctype")
+      ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
+      b.endTree()
+      return kwIdx + 1
+  # An ANONYMOUS routine with a signature but NO body (`= …`, or a curly `{ … }`
+  # body in curly mode) is a proc/iterator TYPE, not a literal: `initDeque[proc ()
+  # {.closure.}]`, a generic/return-type argument. A NAMED routine with no body is
+  # a forward declaration and stays a routine; only anonymous ones become types.
+  block:
+    let nm = ps.tok(kwIdx + 1)
+    let isAnon = nm.kind == tkParLe or nm.kind == tkBracketLe or
+                 nm.kind == tkCurlyLe or (nm.kind == tkOperator and nm.s == "=")
+    if isAnon and hiBound >= 0 and not (nm.kind == tkOperator and nm.s == "="):
+      var d = 0
+      var hasBody = false
+      var k = kwIdx + 1
+      while k < hiBound:
+        let tk = ps.tok(k)
+        if isOpenBracket(tk.kind): inc d
+        elif isCloseBracket(tk.kind):
+          if d > 0: dec d
+        elif d == 0 and tk.kind == tkOperator and tk.s == "=":
+          hasBody = true; break
+        elif d == 0 and ps.curly and tk.kind == tkCurlyLe and
+             ps.tok(k + 1).kind != tkDot:
+          hasBody = true; break
+        inc k
+      if not hasBody:
+        ps.parseProcType(b, int32(kwIdx), int32(hiBound), pl, pc)
+        return hiBound
   b.addTree tag
   var i = kwIdx + 1
   # name — absent for an anonymous routine (`proc (x): T = …`), where the next
@@ -912,7 +1228,22 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
     b.addRaw " x"
   else:
     b.addEmpty
-  b.addEmpty  # pattern
+  # term-rewriting template PATTERN `{ … }` (`template t*{swap(a,b)}(…) = …`) —
+  # a `{` that is NOT a `{.pragma.}`. nifler emits it in the pattern slot as
+  # `(stmts <pattern-expr>)`.
+  if not anon and ps.tok(i).kind == tkCurlyLe and ps.tok(i + 1).kind != tkDot:
+    let lb = ps.tok(i)
+    let rb = ps.matchClose(i)
+    b.addTree "stmts"
+    ps.emitInfo(b, lb.line, lb.col, aTok.line, aTok.col, false)
+    var j = i + 1
+    while j < rb and ps.tok(j).kind != tkEof:
+      if ps.tok(j).kind == tkComment: inc j; continue
+      j = ps.parseStmt(b, j, lb.line, lb.col, rb)
+    b.endTree()
+    i = rb + 1
+  else:
+    b.addEmpty  # pattern
   # generics
   if ps.tok(i).kind == tkBracketLe:
     i = ps.parseGenerics(b, i, aTok.line, aTok.col)
@@ -936,7 +1267,12 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
       b.addEmpty  # return type slot
   # pragmas: `{.` … `.}`. In curly mode a bare `{` (no leading dot) is a block
   # BODY, not pragmas — leave it for the body handler below.
-  if ps.tok(i).kind == tkCurlyLe and
+  # A `{.` on a NEW line that is not indented past the proc keyword is a separate
+  # `{.push/pop.}` statement, NOT this (bodiless) proc's pragmas — nifler keeps it
+  # as a sibling. Only fold pragmas on the signature's line or an indented
+  # continuation.
+  let pragOnSig = ps.tok(i).line == ps.tok(i - 1).line or ps.tok(i).indent > kw.col
+  if ps.tok(i).kind == tkCurlyLe and pragOnSig and
      (not ps.curly or ps.tok(i + 1).kind == tkDot):
     i = ps.parsePragmas(b, i, aTok.line, aTok.col)
   else:
@@ -968,9 +1304,10 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
       # one-line body on the same line as `=`, e.g. `proc f() = echo 1`
       b.addTree "stmts"
       ps.emitInfo(b, first.line, first.col, aTok.line, aTok.col, false)
-      let hi = ps.lineEnd(i)
+      var hi = ps.lineEnd(i)
+      if hiBound >= 0 and hiBound < hi: hi = hiBound   # cap to the enclosing expr
       while i < hi and ps.tok(i).kind != tkEof:
-        i = ps.parseStmt(b, i, first.line, first.col, -1)
+        i = ps.parseStmt(b, i, first.line, first.col, hi)
       b.endTree()
     elif first.indent > refIndent:
       b.addTree "stmts"
@@ -978,6 +1315,19 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
       while ps.tok(i).kind != tkEof and ps.tok(i).indent > refIndent:
         i = ps.parseStmt(b, i, first.line, first.col, -1)
         i = ps.skipTrailingDoc(i, first.indent)   # drop each stmt's trailing `##` doc
+      b.endTree()
+    elif anon and first.indent >= 0 and hiBound >= 0 and i < hiBound:
+      # ANON routine mid-expression (`f(⏎ proc() =⏎ body⏎ )`): `proc` sits at a
+      # large column while its `= body` block is indented only to the ENCLOSING
+      # statement, so `first.indent > kw.col` is false and the body would be
+      # dropped. Use the body's OWN indent as the block threshold, bounded by the
+      # enclosing expression range `hiBound`.
+      b.addTree "stmts"
+      ps.emitInfo(b, first.line, first.col, aTok.line, aTok.col, false)
+      let bodyRef = int(first.indent) - 1
+      while ps.tok(i).kind != tkEof and int(ps.tok(i).indent) > bodyRef and i < hiBound:
+        i = ps.parseStmt(b, i, first.line, first.col, hiBound)
+        i = ps.skipTrailingDoc(i, first.indent)
       b.endTree()
     else:
       b.addEmpty

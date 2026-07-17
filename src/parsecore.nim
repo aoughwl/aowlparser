@@ -20,6 +20,11 @@ type
     curly*: bool   ## experimental: accept `{ … }` as a block body alongside `:`
     depth*: int    ## live recursion nesting through the main parse entry points
     maxDepth*: int ## abort ceiling for `depth` (0 = unlimited, the default)
+    section*: string ## nifler's un-scoped `c.section` state: a var/let/const
+                     ## section resets it to its own tag, but parsing a `(params)`
+                     ## list (proc/proctype value or type) overwrites it to
+                     ## "param" and it is NOT restored — so a section item that
+                     ## FOLLOWS a proc-typed item inherits the `param` tag.
 
 proc initParser*(toks: seq[Token]; file: string; curly = false;
                  maxDepth = 0): Parser =
@@ -84,6 +89,11 @@ proc startsArg(ps: Parser; i, hi: int): bool =
     let leadSpace = t.line != prev.line or t.col > prev.endCol
     let nxt = ps.tok(i + 1)
     return leadSpace and nxt.line == t.line and nxt.col == t.endCol
+  # A `{.` (pragma open) is NOT a command argument — it is a trailing pragma on
+  # the preceding expression (`x {.noSideEffect.} => …` = `(pragmax x …)`), not a
+  # set literal that `x` is applied to.
+  if t.kind == tkCurlyLe and i + 1 < hi and ps.tok(i + 1).kind == tkDot:
+    return false
   result = startsExpr(t) and not isBinaryOp(t)
 
 proc cmdCalleeEnd(ps: Parser; lo, hi: int): int =
@@ -199,7 +209,13 @@ proc continuesLine(prev: Token): bool =
   ## trailing binary/assignment operator, a comma, or a dot.
   case prev.kind
   of tkComma, tkOperator, tkDot: true
-  of tkKeyword: isBinaryOp(prev)
+  # a binary keyword operator (`and`, `shl`, `in`…) or the prefix `not` cannot
+  # end a statement, so a physical line ending on one continues (`x and not⏎ (…)`).
+  # `import`/`export`/`include`/`from` likewise dangle when their module list is on
+  # the next indented line (`import⏎  std/[hashes, strutils]`).
+  of tkKeyword:
+    isBinaryOp(prev) or prev.s == "not" or prev.s == "import" or
+    prev.s == "export" or prev.s == "include" or prev.s == "from"
   else: false
 
 proc lineEnd(ps: Parser; startIdx: int): int =
@@ -218,8 +234,25 @@ proc lineEnd(ps: Parser; startIdx: int): int =
     # not glue the next line on.
     if depth == 0 and i > startIdx:
       let prev = ps.tok(i - 1)
-      if t.line != prev.line and not continuesLine(prev):
-        break
+      # A token only STARTS a new logical line if it is genuinely first on its
+      # physical line (indent >= 0). `t.line != prev.line` alone is fooled by a
+      # multi-line token (a triple-quoted string / long-string literal), whose
+      # `line` is its START line: a token that follows the CLOSE on the same
+      # physical line (`… """ == x`) has indent -1 and must stay a continuation.
+      # A line that OPENS with a `.` is a method-chain continuation of the prior
+      # line (`foo()⏎  .then(x)⏎  .catch(y)`), never a new statement.
+      if t.indent >= 0 and t.line != prev.line and not continuesLine(prev) and
+         t.kind != tkDot:
+        # A DEEPER-indented `elif`/`else` on the next line continues an if/case
+        # EXPRESSION (`return if c: a⏎   else: b`). A STATEMENT's `else` aligns
+        # with its `if` (same indent), so the strict `>` keeps if-statements —
+        # whose bodies lineEnd must not swallow — terminating correctly.
+        let startIndent = ps.tok(startIdx).indent
+        if t.kind == tkKeyword and (t.s == "elif" or t.s == "else") and
+           startIndent >= 0 and t.indent > startIndent:
+          discard        # continuation: fall through without breaking
+        else:
+          break
     if isOpenBracket(t.kind): inc depth
     elif isCloseBracket(t.kind):
       if depth > 0: dec depth
@@ -260,8 +293,11 @@ proc matchOpen(ps: Parser; closeIdx: int): int =
     dec i
   result = closeIdx
 
-proc findSplit(ps: Parser; lo, hi: int): int =
+proc findSplit(ps: Parser; lo, hi: int; typeCtx = false): int =
   ## Rightmost lowest-precedence binary operator at depth 0 in `[lo, hi)`, or -1.
+  ## In TYPE context (`typeCtx`) the prefix-type keywords `ptr`/`ref` also act as
+  ## infix operators when they sit between operands (`nil ptr uint32` →
+  ## `(infix ptr (nil) uint32)`); nifler gives them precedence 3 (like `or`).
   var depth = 0
   var bestPrec = 1000
   result = -1
@@ -275,6 +311,28 @@ proc findSplit(ps: Parser; lo, hi: int): int =
       let p = precedenceOf(t)
       if p <= bestPrec:
         bestPrec = p
+        result = i
+    elif depth == 0 and i > lo and i + 1 < hi and typeCtx and
+         t.kind == tkKeyword and (t.s == "ptr" or t.s == "ref" or t.s == "not") and
+         # `ptr`/`ref`/`not` is infix ONLY between operands (`nil ptr uint32`, the
+         # nilability constraint `cstring not nil`). When its left neighbour is a
+         # binary operator or another `ptr`/`ref`, it is that operator's right
+         # OPERAND, not an infix — e.g. in a type class
+         # `SomeInteger | bool | ptr | pointer` the `|` binds and `ptr` is a bare
+         # operand. Guarding on the previous token keeps the `|` chain splitting on
+         # `|` (precedence 8) instead of on the `ptr` (precedence 3).
+         not isBinaryOp(ps.tok(i - 1)) and
+         # A left neighbour `:` means `ptr`/`ref` opens the TYPE after a return or
+         # field colon (`proc (): ptr T {.cdecl.}`, `x: ref Y`), so it is a prefix
+         # modifier of that type, not an infix — otherwise the whole proc type
+         # mis-splits into `(infix ptr (proctype …) …)`.
+         ps.tok(i - 1).kind != tkColon and
+         # A left neighbour that is a PREFIX type modifier (`var ref T`, `sink ptr
+         # X`, `lent ref Y`) makes `ref`/`ptr` that modifier's operand, not an
+         # infix — otherwise `var ref T` mis-splits into `(infix ref (mut) T)`.
+         ps.tok(i - 1).s notin ["ptr", "ref", "var", "out", "distinct"]:
+      if 3 <= bestPrec:
+        bestPrec = 3
         result = i
     inc i
 
@@ -309,6 +367,33 @@ proc splitArgs(ps: Parser; lo, hi: int): seq[int] =
       if i + 1 < hi: result.add(i + 1)
     inc i
 
+proc splitPragmaItems(ps: Parser; lo, hi: int): seq[int] =
+  ## Like `splitArgs`, but a pragma list separates items by a comma OR by a bare
+  ## line break: Nim's parsePragma loops `exprColonEqExpr` and treats each logical
+  ## line as an item, so `{.importc: "x", pure, final⏎ header: "y".}` has `final`
+  ## and `header` as separate pragmas even with the comma missing. A depth-0
+  ## newline whose previous token does not force a continuation starts a new item.
+  result = @[]
+  if lo >= hi: return
+  result.add lo
+  var depth = 0
+  var i = lo
+  while i < hi:
+    let t = ps.tok(i)
+    if isOpenBracket(t.kind): inc depth
+    elif isCloseBracket(t.kind):
+      if depth > 0: dec depth
+    elif depth == 0 and i > lo:
+      let prev = ps.tok(i - 1)
+      if t.kind == tkComma:
+        if i + 1 < hi: result.add(i + 1)
+      elif prev.kind != tkComma and prev.kind != tkColon and
+           t.line != prev.line and not continuesLine(prev):
+        # A trailing `key:` colon dangling at end of line means the value sits on
+        # the NEXT physical line (`{.deprecated:⏎ "msg".}`) — one item, not two.
+        result.add i          # newline-separated item (missing comma)
+    inc i
+
 # ---------------------------------------------------------------------------
 # FORWARD DECLS — cross-file call surface (append-only shared edit point)
 # ---------------------------------------------------------------------------
@@ -316,6 +401,7 @@ proc splitArgs(ps: Parser; lo, hi: int): seq[int] =
 proc parseExprRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
 proc parsePrimaryRange(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
 proc parseCaseExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32)
+proc parseForExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32; bare = true)
 # parse_stmt.nim implements:
 proc parseStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
                hiLimit: int): int
@@ -326,7 +412,8 @@ proc parsePostExprBlock(ps: var Parser; b: var Builder; headLo, colonIdx: int;
                         pl, pc: int32): int
 proc skipTrailingDoc(ps: Parser; i, refIndent: int): int
 proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
-                  tag: string): int
+                  tag: string; hiBound: int = -1): int
 # parse_type.nim implements:
 proc parseType(ps: var Parser; b: var Builder; idx: int; pl, pc: int32): int
 proc parseTypeSection(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int
+proc parsePragmas(ps: var Parser; b: var Builder; braceIdx: int; pl, pc: int32): int
