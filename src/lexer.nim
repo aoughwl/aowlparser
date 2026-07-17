@@ -434,8 +434,15 @@ proc lexNumber(lx: var Lexer): Token =
   var isFloat = false
 
   # ---- base prefix -------------------------------------------------------
+  # `0O…` (capital O) is NOT a valid octal prefix in Nim — it's too easily
+  # confused with a `0` followed by the letter O. nifler rejects it outright.
+  if lx.cur == '0' and lx.peek(1) == 'O':
+    lx.addDiag(sevError, "invalid-int-literal",
+               "'0O' is not a valid octal prefix — use lowercase '0o'",
+               lx.line, lx.col, lx.col + 2)
   if lx.cur == '0' and lx.peek(1) in {'x', 'X', 'o', 'b', 'B', 'c', 'C'}:
     let b = lx.peek(1)
+    let pcol = lx.col
     advance lx # '0'
     advance lx # base char
     case b
@@ -455,6 +462,10 @@ proc lexNumber(lx: var Lexer): Token =
         advance lx
       else:
         break
+    if digits.len == 0:
+      # a base prefix with NO digits: `0x`, `0b`, `0o` (nifler: "invalid number").
+      lx.addDiag(sevError, "invalid-number",
+                 "'0" & b & "' has no digits", lx.line, pcol, lx.col)
   else:
     # ---- decimal integer part ---------------------------------------------
     while true:
@@ -590,6 +601,7 @@ proc lexOperator(lx: var Lexer): Token =
 
 proc lexIdent(lx: var Lexer): Token =
   result = startToken(lx, tkIdent)
+  let scol = lx.col
   var s = ""
   while lx.pos < lx.n and isIdentCont(lx.cur):
     s.add lx.cur
@@ -597,6 +609,19 @@ proc lexIdent(lx: var Lexer): Token =
   result.s = s
   if isKeyword(s):
     result.kind = tkKeyword
+  # Nim identifiers may not END in '_' or contain '__' (an underscore must sit
+  # between two alphanumerics). nifler: "invalid token: trailing underscore".
+  # ASCII-only: a UTF-8 identifier legitimately contains high bytes, and '_'
+  # rules there are unchanged, so this only inspects '_' runs.
+  if s.len >= 2 and s[s.len - 1] == '_':
+    lx.addDiag(sevError, "invalid-identifier",
+               "identifier may not end with '_'", result.line, scol, lx.col)
+  else:
+    for i in 1 ..< s.len:
+      if s[i] == '_' and s[i-1] == '_':
+        lx.addDiag(sevError, "invalid-identifier",
+                   "identifier may not contain '__'", result.line, scol, lx.col)
+        break
 
 const QuoteMergeChars = OperatorChars + {'(', ')', '[', ']', '{', '}'} - {':'}
 

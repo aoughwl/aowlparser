@@ -103,6 +103,22 @@ for ok in 'if x == 5:' 'if f(k = v):' 'when compiles(x = 5):'; do
     echo "FAIL: '$ok' must NOT flag assignment-in-condition"; fail=1; }
 done
 
+# (4g) lexer-level numeric/identifier errors nifler catches (found by the
+# Nim/tests differential). Each must fire on the bad form and stay silent on the
+# valid one.
+declare -A badnum=( ['echo 0x']=invalid-number ['echo 0b']=invalid-number
+                    ['echo 0O5']=invalid-int-literal ['var ef_ = 3']=invalid-identifier
+                    ['var a__b = 1']=invalid-identifier )
+for src in "${!badnum[@]}"; do
+  printf '%s\n' "$src" > "$WORK/nn.nim"
+  grep -q "${badnum[$src]}" <<<"$("$NP" check "$WORK/nn.nim" 2>&1)" || {
+    echo "FAIL: '$src' should report ${badnum[$src]}"; fail=1; }
+done
+for ok in 'let x = 1_000_000' 'let h = 0xFF_FF' 'var my_var = 1' 'let _ = f()' 'let b = 0b1010'; do
+  printf '%s\n' "$ok" > "$WORK/nn.nim"
+  [ -z "$("$NP" check "$WORK/nn.nim" 2>&1)" ] || { echo "FAIL: '$ok' must be silent"; fail=1; }
+done
+
 # (5) diagnostics are emitted in SOURCE ORDER (top-to-bottom), not validator order.
 printf 'let a = (1\nvar b = {2\n' > "$WORK/ord.nim"
 lines="$("$NP" check "$WORK/ord.nim" 2>&1)"
