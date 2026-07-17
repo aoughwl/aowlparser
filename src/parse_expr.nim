@@ -235,6 +235,19 @@ proc parseIfExpr(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32;
         else:
           nxt = j; break
       inc j
+    if colon < 0:
+      # A malformed branch with NO body colon — the degenerate `(if)` / `(when)`.
+      # `colon` stays -1, so `colon + 1` would be token 0 and the branch body
+      # would be re-parsed from the START OF FILE, recursing until the stack (or
+      # patience) runs out. Emit an empty branch instead and move on; `check`
+      # reports the real error. `nxt` is always > i, so this always progresses.
+      b.addTree(if isElse: "else" else: "elif")
+      ps.emitInfo(b, kw.line, kw.col, ifTok.line, ifTok.col, false)
+      if not isElse: b.addEmpty    # condition
+      b.addEmpty                   # body
+      b.endTree()
+      i = nxt
+      continue
     let bodyLo = colon + 1
     if isElse:
       b.addTree "else"
@@ -779,34 +792,42 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
           ps.emitName(b, ps.tok(segLo + 1), rt.line, rt.col)   # label
         else:
           b.addEmpty
-        let first = ps.tok(bcolon + 1)
-        # count body statements: depth-0 `;` or a non-continuing line break.
-        var nStmts = if bcolon + 1 < rpIdx: 1 else: 0
-        block:
-          var depth = 0
-          var k = bcolon + 1
-          while k < rpIdx:
-            let tk = ps.tok(k)
-            if isOpenBracket(tk.kind): inc depth
-            elif isCloseBracket(tk.kind):
-              if depth > 0: dec depth
-            elif depth == 0 and k > bcolon + 1:
-              let pv = ps.tok(k - 1)
-              if tk.kind == tkSemicolon:
-                if k + 1 < rpIdx: inc nStmts
-              elif pv.kind != tkSemicolon and tk.line != pv.line and
-                   not continuesLine(pv):
-                inc nStmts
-            inc k
-        let wrap = nStmts > 1
-        if wrap:
-          b.addTree "stmts"
-          ps.emitInfo(b, first.line, first.col, rt.line, rt.col, false)
-        var sj = bcolon + 1
-        while sj < rpIdx and ps.tok(sj).kind != tkEof:
-          sj = ps.parseStmt(b, sj, first.line, first.col, rpIdx)
-          if sj < rpIdx and ps.tok(sj).kind == tkSemicolon: inc sj
-        if wrap: b.endTree()   # stmts
+        block blockBody:
+          if bcolon < 0:
+            # A malformed `block` with NO body colon — the degenerate `(block)`.
+            # `bcolon + 1` would index token 0, so the body would be parsed from
+            # the START OF FILE and recurse forever. Emit an empty body instead;
+            # `check` reports the real error.
+            b.addEmpty
+            break blockBody
+          let first = ps.tok(bcolon + 1)
+          # count body statements: depth-0 `;` or a non-continuing line break.
+          var nStmts = if bcolon + 1 < rpIdx: 1 else: 0
+          block:
+            var depth = 0
+            var k = bcolon + 1
+            while k < rpIdx:
+              let tk = ps.tok(k)
+              if isOpenBracket(tk.kind): inc depth
+              elif isCloseBracket(tk.kind):
+                if depth > 0: dec depth
+              elif depth == 0 and k > bcolon + 1:
+                let pv = ps.tok(k - 1)
+                if tk.kind == tkSemicolon:
+                  if k + 1 < rpIdx: inc nStmts
+                elif pv.kind != tkSemicolon and tk.line != pv.line and
+                     not continuesLine(pv):
+                  inc nStmts
+              inc k
+          let wrap = nStmts > 1
+          if wrap:
+            b.addTree "stmts"
+            ps.emitInfo(b, first.line, first.col, rt.line, rt.col, false)
+          var sj = bcolon + 1
+          while sj < rpIdx and ps.tok(sj).kind != tkEof:
+            sj = ps.parseStmt(b, sj, first.line, first.col, rpIdx)
+            if sj < rpIdx and ps.tok(sj).kind == tkSemicolon: inc sj
+          if wrap: b.endTree()   # stmts
         b.endTree()   # block
       elif rt.kind == tkKeyword and
            (rt.s == "var" or rt.s == "let" or rt.s == "const" or
