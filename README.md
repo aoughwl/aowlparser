@@ -9,12 +9,15 @@ Its output is **byte-for-byte identical** to native `nifler` — save for one li
 it owns on purpose, the `(.vendor "aowlparser")` header (aowlparser stamps its own
 identity rather than impersonating `nifler`). The entire **nimony** source tree and
 standard library round-trip (184/184 nimony/src byte-exact, 105/105 nimony/lib
-structural parity), and all 151 corpus programs pass — 140 of them byte-for-byte.
+structural parity), and all 169 corpus programs pass — 154 of them byte-for-byte.
 
 Beyond nimony's own tree, aowlparser is validated against the **full upstream Nim
-standard library** by differential fuzzing: **295 of 310 `Nim/lib` files** now
-round-trip structure-identical to `nifler`, with the remaining handful being
-rare multi-construct edge cases under active reduction (0 crashes, 0 hangs).
+standard library** by differential fuzzing: **all 310 of 310 `Nim/lib` files**
+now round-trip **structure-identical** to `nifler` — 283 of them byte-for-byte —
+with 0 crashes and 0 hangs. Every construct in the real Nim stdlib parses,
+including term-rewriting template patterns, `Inf`/`NaN` hex-bit literals, custom
+numeric literals (`1'big`), method-chain continuations, multi-`do` calls, and
+pragma-decorated lambda sugar.
 
 Where aowlparser goes **beyond** `nifler`: it never dies on the first error.
 It **recovers** and keeps parsing, reports **structured diagnostics**
