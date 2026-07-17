@@ -1079,7 +1079,7 @@ proc parsePostExprBlock(ps: var Parser; b: var Builder; headLo, colonIdx: int;
           b.addTree "suf"
           ps.emitInfo(b, s.line, s.col, s.line, s.col, false)
           b.addStrLit s.s
-          b.addStrLit "R"
+          b.addStrLit(if s.kind == tkTripleStrLit: "T" else: "R")
           b.endTree()   # suf
           result = ps.emitBody(b, colonIdx, refIndent, s.line, s.col)  # (stmts body)
           result = ps.appendTrailingDo(b, result, int(refIndent), s.line, s.col)

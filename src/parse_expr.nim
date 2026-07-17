@@ -417,7 +417,7 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
         b.addTree "suf"
         ps.emitInfo(b, s.line, s.col, s.line, s.col, false)       # suf inherits (no info)
         b.addStrLit s.s
-        b.addStrLit "R"
+        b.addStrLit(if s.kind == tkTripleStrLit: "T" else: "R")
         b.endTree()
         b.endTree()
         return

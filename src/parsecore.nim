@@ -229,7 +229,12 @@ proc lineEnd(ps: Parser; startIdx: int): int =
     # not glue the next line on.
     if depth == 0 and i > startIdx:
       let prev = ps.tok(i - 1)
-      if t.line != prev.line and not continuesLine(prev):
+      # A token only STARTS a new logical line if it is genuinely first on its
+      # physical line (indent >= 0). `t.line != prev.line` alone is fooled by a
+      # multi-line token (a triple-quoted string / long-string literal), whose
+      # `line` is its START line: a token that follows the CLOSE on the same
+      # physical line (`… """ == x`) has indent -1 and must stay a continuation.
+      if t.indent >= 0 and t.line != prev.line and not continuesLine(prev):
         # A DEEPER-indented `elif`/`else` on the next line continues an if/case
         # EXPRESSION (`return if c: a⏎   else: b`). A STATEMENT's `else` aligns
         # with its `if` (same indent), so the strict `>` keeps if-statements —
