@@ -101,6 +101,18 @@ proc parseReturnLike(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
   b.addTree tag
   ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
   if kwIdx + 1 < hi and startsExpr(ps.tok(kwIdx+1)):
+    # a postExprBlock value (`return quote: toJs(x)` / `yield foo: body`) — a
+    # depth-0 `:` makes the value a `(call callee (stmts body))`, not a `kv`.
+    let v0 = ps.tok(kwIdx + 1)
+    let ctrlVal = v0.kind == tkKeyword and
+                  (v0.s == "if" or v0.s == "when" or v0.s == "case" or
+                   v0.s == "try" or v0.s == "for" or v0.s == "block" or
+                   v0.s == "while")
+    let vcolon = if ctrlVal: -1 else: ps.depth0Colon(kwIdx + 1, hi)
+    if vcolon >= 0:
+      result = ps.parsePostExprBlock(b, kwIdx + 1, vcolon, kw.line, kw.col)
+      b.endTree()
+      return
     ps.parseExprRange(b, int32(kwIdx) + 1, int32(hi), kw.line, kw.col)
   else:
     b.addEmpty
