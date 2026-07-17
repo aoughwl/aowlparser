@@ -221,6 +221,30 @@ out="$("$NP" check "$WORK/tmpl.nim" 2>&1)"; rc=$?
 [ -z "$out" ] || { echo "FAIL: filtered template must be silent, got: $out"; fail=1; }
 [ "$rc" -eq 0 ] || { echo "FAIL: filtered template exit was $rc, want 0"; fail=1; }
 
+# (4n) a routine (proc/func/method/iterator/…) with an indented body but no `=`
+# to introduce it — the classic "forgot the '='". nifler only says "invalid
+# indentation, maybe you forgot a '='"; we name the routine, point at both the
+# body and the header, and offer the fix. Must NOT fire on a valid forward/magic
+# declaration, even one carrying an indented `##` doc comment.
+for bad in 'proc f()' 'func g(x: int)' 'iterator it(): int'; do
+  printf '%s\n  echo 1\n' "$bad" > "$WORK/re.nim"
+  out="$("$NP" check "$WORK/re.nim" 2>&1)"
+  grep -q 'missing-routine-equals' <<<"$out" || {
+    echo "FAIL: '$bad' + body should report missing-routine-equals"; fail=1; }
+  grep -q 'help: ' <<<"$out" || { echo "FAIL: missing '=' should carry a fix"; fail=1; }
+  grep -q 'declared here' <<<"$out" || { echo "FAIL: missing '=' should point at the header"; fail=1; }
+done
+# valid forms that must stay silent: a real body (`=`), a bare forward decl, and
+# a magic/importc decl documented with an indented `##` comment.
+printf 'func defined*(x: untyped): bool {.magic: Defined.}\n  ## doc\n  ## more\n' > "$WORK/re.nim"
+grep -q 'missing-routine-equals' <<<"$("$NP" check "$WORK/re.nim" 2>&1)" && {
+  echo "FAIL: documented magic decl must be silent"; fail=1; }
+for ok in 'proc f() =\n  echo 1' 'proc f()\ntype T = int' 'proc c(): cint {.importc.}'; do
+  printf "$ok\n" > "$WORK/re.nim"
+  grep -q 'missing-routine-equals' <<<"$("$NP" check "$WORK/re.nim" 2>&1)" && {
+    echo "FAIL: valid '$ok' must be silent"; fail=1; }
+done
+
 # (5) diagnostics are emitted in SOURCE ORDER (top-to-bottom), not validator order.
 printf 'let a = (1\nvar b = {2\n' > "$WORK/ord.nim"
 lines="$("$NP" check "$WORK/ord.nim" 2>&1)"

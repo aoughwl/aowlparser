@@ -1347,6 +1347,24 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
     else:
       b.addEmpty
   else:
+    # No `=` and no curly body. A bodiless routine is a valid FORWARD
+    # DECLARATION — but only if nothing deeper-indented follows. A statement
+    # indented past the routine keyword can only be a body, so the `=` that
+    # introduces one was forgotten (`proc f()⏎  echo 1`). nifler reports this as
+    # "invalid indentation, maybe you forgot a '='". Zero-FP: valid Nim never
+    # puts a deeper-indented statement after a bodiless routine header.
+    # A bodiless routine may still carry indented `##` DOC COMMENTS
+    # (`func x() {.magic.}⏎  ## doc`) — those attach to the declaration and are
+    # NOT a body. Skip them; only a real deeper-indented STATEMENT means the `=`
+    # was forgotten.
+    var k = i
+    while ps.tok(k).kind == tkComment and ps.tok(k).indent > kw.col: inc k
+    let bt = ps.tok(k)
+    if not anon and bt.kind != tkEof and bt.indent > kw.col:
+      ps.perrRel("missing-routine-equals",
+        "'" & tag & "' has an indented body but no '=' to introduce it",
+        bt, "'" & tag & "' declared here", kw,
+        fix = "insert '=' after the signature")
     b.addEmpty
   b.endTree()
   result = i
