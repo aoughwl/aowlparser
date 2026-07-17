@@ -298,12 +298,34 @@ proc runParse(src, outp, fileField: string; toStdout, strict, curly: bool;
       write stderr, "aowlparser: " & $nErr & " error(s) in input [--strict]\n"
       quit 1
 
+proc usesSourceFilter(src: string): bool =
+  ## A file whose first non-blank line is a `#?` filter directive (`#? stdtmpl`,
+  ## `#? strip`, …) is NOT plain Nim — the compiler rewrites it through a
+  ## source-code filter before parsing. We don't run filters, so any lexical
+  ## "error" we'd report on the raw text (an apostrophe in HTML, a stray `>`)
+  ## would be spurious. Detect the header and skip lexical linting entirely.
+  var i = 0
+  let n = src.len
+  while i < n:
+    # skip blank lines and leading horizontal whitespace
+    while i < n and (src[i] == ' ' or src[i] == '\t' or src[i] == '\r' or
+                     src[i] == '\n'): inc i
+    if i >= n: return false
+    # first real character of a line
+    if src[i] == '#' and i + 1 < n and src[i+1] == '?': return true
+    return false
+  return false
+
 proc runCheck(src, fileField: string; opts: LexOptions; diagFmt: DiagFormat;
               curly = false; maxDepth = 0): int =
   ## Lint-only mode (`aowlparser check`): emit diagnostics to STDOUT (text or json,
   ## default text) and no AIF. Returns the process exit code — 1 if any error-level
   ## diagnostic was found, else 0. This is the "better errors than nifler" surface:
   ## recoverable, multi-error, machine-readable, and it never aborts on the first.
+  if usesSourceFilter(src):
+    # Not plain Nim — needs a source-code filter we don't apply. Stay silent
+    # (exit 0) rather than report spurious lexical errors on the raw template.
+    return 0
   let (toks, diags0) = collectDiags(src, opts)
   var diags = diags0
   # GRAMMAR errors are discovered by parsing (each of the parser's coping points

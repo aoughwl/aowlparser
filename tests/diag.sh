@@ -213,6 +213,14 @@ for ok in 'foo(a,)' 'foo(a, b,)' '[1,2,]' '(1,)'; do
     echo "FAIL: trailing comma '$ok' is valid and must be silent"; fail=1; }
 done
 
+# (4m) a `#? stdtmpl` source-code filter header means the file is NOT plain Nim
+# (it is rewritten by a filter before parsing). Lexical checks would report
+# spurious errors on the raw template, so `check` stays silent on such files.
+printf '#? stdtmpl(subsChar = $)\n<h1>${x}'"'"'s time</h1>\n' > "$WORK/tmpl.nim"
+out="$("$NP" check "$WORK/tmpl.nim" 2>&1)"; rc=$?
+[ -z "$out" ] || { echo "FAIL: filtered template must be silent, got: $out"; fail=1; }
+[ "$rc" -eq 0 ] || { echo "FAIL: filtered template exit was $rc, want 0"; fail=1; }
+
 # (5) diagnostics are emitted in SOURCE ORDER (top-to-bottom), not validator order.
 printf 'let a = (1\nvar b = {2\n' > "$WORK/ord.nim"
 lines="$("$NP" check "$WORK/ord.nim" 2>&1)"

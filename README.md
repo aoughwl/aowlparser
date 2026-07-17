@@ -33,12 +33,28 @@ markedly better front end for editors, LSPs, and CI:
   `(` it should have matched (`note: '(' opened here`), as a structured field.
 - **Machine-readable.** `--diagnostics:json` emits `{severity, code, message,
   line, col, endCol, fix, related}` per diagnostic, for editor quick-fixes.
+- **Full lexer-error parity, and then some.** Every classic lexical error
+  `nifler` reports, aowlparser now reports too, recovering past each instead of
+  aborting: bad character literals (empty `''`, run-on `'ab'`, unterminated
+  `'a`), illegal tabs (anywhere outside strings/comments), unterminated block
+  comments (`#[ … `), malformed escapes (`\q`, empty `\x`, empty `\u{}`),
+  unterminated triple/raw strings, doubled/trailing underscores in a number,
+  and unterminated accent-quoted identifiers.
 - **Detections nifler lacks or reports vaguely**: assignment in a condition
-  (`if x = 5:` → *did you mean `==`?*), empty conditions (`elif:`), invalid
-  numeric/identifier literals (`0x` with no digits, `0O` octal, trailing `_`),
-  and full UTF-8 identifier support.
+  (`if x = 5:` → *did you mean `==`?*), empty conditions (`elif:`), empty comma
+  slots (`foo(a,,b)` — while correctly allowing a valid *trailing* comma),
+  invalid numeric/identifier literals, and full UTF-8 identifier support.
+- **Knows what isn't plain Nim.** A file opening with a `#? stdtmpl` source-code
+  filter is a template, not Nim — `check` stays silent instead of flagging the
+  raw HTML, where `nifler` only tokenizes it by luck.
 - Every check is proven **zero-false-positive** against ~600 valid files and the
   whole Nim standard library, and never changes the emitted AIF.
+
+Measured against the full Nim compiler test corpus (2890 files): where `nifler`
+reports a syntax error, aowlparser now reports one too — except a small residue
+of *indentation-context* errors deliberately left out (see below). We report
+**zero** false errors on files `nifler` accepts, and we parse cleanly **6 files
+that crash `nifler` outright**.
 
 Honest limitation: `nifler` still flags a handful of subtle *indentation-context*
 errors we don't — those are deliberately left out rather than risk a false
