@@ -121,10 +121,11 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
   # OPT-IN idiomatic lints on VALID code (`--idioms:warn`). These never change the
   # emitted AIF and default OFF, so the zero-FP corpus stays clean. Each is a HINT:
   # the code compiles, it just isn't how a Nim programmer would write it.
-  if opts.idiomsWarn or opts.floatEqWarn:
-    # A single scan over the `==`/`!=` operators feeds two INDEPENDENTLY-gated
-    # lints: the bool-literal compare (idiomsWarn) and the float-equality compare
-    # (floatEqWarn). Either flag alone activates its own branch.
+  if opts.idiomsWarn or opts.floatEqWarn or opts.nilStyleWarn or opts.yodaWarn:
+    # A single scan over the `==`/`!=` operators feeds several INDEPENDENTLY-gated
+    # lints: the bool-literal compare (idiomsWarn), float-equality (floatEqWarn),
+    # nil-comparison (nilStyleWarn), and the yoda condition (yodaWarn). Any flag
+    # alone activates only its own branch.
     for oi in 0 ..< toks.len:
       let op = toks[oi]
       if op.kind != tkOperator or (op.s != "==" and op.s != "!="): continue
@@ -165,6 +166,36 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
           message: "'" & op.s & "' on a float literal is unreliable — floats rarely compare exactly",
           line: op.line, col: op.col, endCol: op.endCol,
           fix: "compare with a tolerance, e.g. abs(a - b) < 1e-9, or use 'almostEqual'")
+      # `x == nil` / `x != nil` — an OPINION (off by default, config-gated). Many
+      # projects prefer `x.isNil` / `not x.isNil`. `nil` is a keyword, so the match
+      # is unambiguous. Independent branch (co-fires with nothing else here).
+      if opts.nilStyleWarn and
+         ((np < toks.len and toks[np].kind == tkKeyword and toks[np].s == "nil") or
+          (pp >= 0 and toks[pp].kind == tkKeyword and toks[pp].s == "nil")):
+        let repl = if op.s == "==": "x.isNil" else: "not x.isNil"
+        result.add Diagnostic(severity: sevHint, code: "nil-comparison",
+          message: "'" & op.s & " nil' — this project prefers 'isNil'",
+          line: op.line, col: op.col, endCol: op.endCol,
+          fix: "use '" & repl & "'")
+      # Yoda condition — a LITERAL on the left of the compare (`0 == x`). An OPINION
+      # (off by default): Nim has no `if x = 0` foot-gun to guard against, so the
+      # natural `x == 0` reads better. Fires only when the LEFT is a number/string/
+      # char literal and the RIGHT is NOT a literal (so `1 == 2` and the bool/nil
+      # cases handled above are excluded).
+      if opts.yodaWarn and pp >= 0 and np < toks.len:
+        let lp = toks[pp].kind
+        let leftLit = lp == tkIntLit or lp == tkFloatLit or lp == tkStrLit or
+                      lp == tkRStrLit or lp == tkTripleStrLit or lp == tkCharLit
+        let rk = toks[np].kind
+        let rightLit = rk == tkIntLit or rk == tkFloatLit or rk == tkStrLit or
+                       rk == tkRStrLit or rk == tkTripleStrLit or rk == tkCharLit or
+                       (rk == tkKeyword and toks[np].s == "nil") or
+                       (rk == tkIdent and (toks[np].s == "true" or toks[np].s == "false"))
+        if leftLit and not rightLit:
+          result.add Diagnostic(severity: sevHint, code: "yoda-condition",
+            message: "a literal on the left of '" & op.s & "' (a 'yoda' compare) — put the value first",
+            line: op.line, col: op.col, endCol: op.endCol,
+            fix: "write '<expr> " & op.s & " " & toks[pp].s & "'")
     # `not not x` — a double negation. `not` is a keyword; two adjacent (ignoring
     # comments) collapse to identity. Only doc-comment prose ever says "not not",
     # and that lexes as tkComment, so it is never matched here. idiomsWarn only.
@@ -1305,6 +1336,18 @@ proc main() =
       of "warn": opts.floatEqWarn = true
       else:
         write stderr, "unknown --float-equality mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--nil-comparison:"):
+      case afterColon(a)
+      of "warn": opts.nilStyleWarn = true
+      else:
+        write stderr, "unknown --nil-comparison mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--yoda:"):
+      case afterColon(a)
+      of "warn": opts.yodaWarn = true
+      else:
+        write stderr, "unknown --yoda mode: " & afterColon(a) & "\n"
         usage()
     elif hasPrefix(a, "--bom:"):
       case afterColon(a)

@@ -82,13 +82,17 @@ type
                             ## `not not` double negation. Opt-in (default off).
     floatEqWarn*: bool      ## advisory: flag `==`/`!=` against a float literal
                             ## (unreliable; use a tolerance). Opt-in (default off).
+    nilStyleWarn*: bool     ## OPINION: flag `x == nil`/`x != nil` (prefer isNil).
+                            ## Off by default; config-gated (`[rules]`).
+    yodaWarn*: bool         ## OPINION: flag a literal on the left of `==`/`!=`
+                            ## (a 'yoda' compare). Off by default; config-gated.
 
 const
   defaultLexOptions* = LexOptions(tabPolicy: tpSpaces, tabWidth: 8, indentWidth: 0,
     finalNewlineRequire: false, newlinePolicy: nlAny, trailingWhitespaceWarn: false,
     bomPolicy: bomDefault, indentConsistency: false, tabStops: tsHard,
     docComments: true, cOperatorsWarn: false, semicolonWarn: false,
-    idiomsWarn: false, floatEqWarn: false)
+    idiomsWarn: false, floatEqWarn: false, nilStyleWarn: false, yodaWarn: false)
 
 type
   Lexer = object

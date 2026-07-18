@@ -1420,10 +1420,18 @@ proc parseRoutine(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
     while ps.tok(k).kind == tkComment and ps.tok(k).indent > kw.col: inc k
     let bt = ps.tok(k)
     if not anon and bt.kind != tkEof and bt.indent > kw.col:
-      ps.perrRel("missing-routine-equals",
-        "'" & tag & "' has an indented body but no '=' to introduce it",
-        bt, "'" & tag & "' declared here", kw,
-        fix = "insert '=' after the signature")
+      # Anchor the error where the '=' is MISSING — just past the end of the
+      # signature — not on the body's first token (which reads as "the error is
+      # in my body"). The body line becomes the RELATED marker.
+      var s = i - 1
+      while s > 0 and ps.tok(s).kind == tkComment: dec s
+      let sigEnd = ps.tok(s)
+      ps.diags.add Diagnostic(severity: sevError, code: "missing-routine-equals",
+        message: "'" & tag & "' has an indented body but no '=' to introduce it",
+        line: sigEnd.line, col: sigEnd.endCol, endCol: sigEnd.endCol,
+        fix: "insert '=' after the signature",
+        relMsg: "this indented line is read as the body",
+        relLine: bt.line, relCol: bt.col)
     b.addEmpty
   b.endTree()
   result = i

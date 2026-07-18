@@ -238,21 +238,58 @@ proc findColon(ps: Parser; lo, hi: int): int =
     inc i
   result = brace
 
+proc missingColonPos(ps: Parser; hdrIdx: int; pl, pc: int32): (int32, int32, string) =
+  ## Where the missing `:` belongs, for the expected-colon fix. Two shapes:
+  ##   * one-liner `if c return x` — the `:` goes right after the condition, i.e.
+  ##     just before a depth-0 STATEMENT keyword (return/yield/break/…) that can
+  ##     never sit inside a condition expression.
+  ##   * `if c` with the body indented on the next line — the `:` goes at the end
+  ##     of the header line (after the last header token).
+  ## Falls back to the branch anchor when we have no header index.
+  if hdrIdx < 0: return (pl, pc, "insert ':' at the end of the line")
+  let hi = ps.lineEnd(hdrIdx)
+  var depth = 0
+  var lastReal = hdrIdx
+  var i = hdrIdx + 1
+  while i < hi:
+    let t = ps.tok(i)
+    if isOpenBracket(t.kind): inc depth
+    elif isCloseBracket(t.kind):
+      if depth > 0: dec depth
+    elif depth == 0 and t.kind == tkKeyword and
+         (t.s == "return" or t.s == "yield" or t.s == "break" or
+          t.s == "continue" or t.s == "raise" or t.s == "discard"):
+      # `:` immediately before this statement keyword = end of the prior token.
+      let prev = ps.tok(i - 1)
+      return (prev.line, prev.endCol, "insert ':' after the condition")
+    if t.kind != tkComment: lastReal = i
+    inc i
+  let e = ps.tok(lastReal)
+  result = (e.line, e.endCol, "insert ':' at the end of the line")
+
 proc emitBody(ps: var Parser; b: var Builder; colonIdx: int; refIndent: int32;
-              pl, pc: int32; hdrIndent: int32 = -1): int =
+              pl, pc: int32; hdrIndent: int32 = -1; hdrIdx: int = -1): int =
   ## Emit a `(stmts …)` body after a `:`. Handles both the one-line form
   ## (`if c: stmt`) and the indented block (mirrors parseRoutine's body loop).
   ## `pl,pc` = the controlling branch node position (parent of the stmts node).
+  ## `hdrIdx` = the header keyword index, used only to locate a missing `:`.
   if colonIdx < 0:
     # No body-introducing `:` found — the construct is malformed (`if c` with no
     # colon, `while x`, a bare `try`). EVERY statement control-flow form funnels
     # its body through here, so this one site reports them all. Emit an empty body
     # and do NOT restart at token 0.
+    let (cl, cc, cfix) = ps.missingColonPos(hdrIdx, pl, pc)
     ps.perrAt("expected-colon",
-              "expected ':' to open this block's body", pl, pc,
-              fix = "insert ':' at the end of the line")
+              "expected ':' to open this block's body", cl, cc, fix = cfix)
     b.addTree "stmts"; b.addEmpty; b.endTree()
-    return colonIdx     # caller advances past this construct via its own lineEnd
+    # Advance PAST the malformed header line so the caller resumes after it. When
+    # we have the header index, return the token after its line; otherwise fall
+    # back to the historical -1 (caller advances via its own lineEnd). Returning
+    # -1 unconditionally let a NESTED caller (a routine body loop) re-enter the
+    # same construct and report the missing ':' twice — the duplicate-diagnostic
+    # bug.
+    if hdrIdx >= 0: return int(ps.lineEnd(hdrIdx))
+    return colonIdx
   if ps.tok(colonIdx).kind == tkCurlyLe:
     # curly-block body: `… { stmt; stmt }`. Delimited by the matching `}`;
     # statements inside are `;`- or newline-separated (parseStmt chains `;`).
@@ -375,14 +412,14 @@ proc parseIfLike(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
       b.addTree "elif"
       ps.emitInfo(b, condTok.line, condTok.col, kw.line, kw.col, false)  # elif = cond pos
       ps.parseExprRange(b, int32(i + 1), int32(colon), condTok.line, condTok.col)
-      i = ps.emitBody(b, colon, refIndent, condTok.line, condTok.col, ps.lineIndentOf(i))
+      i = ps.emitBody(b, colon, refIndent, condTok.line, condTok.col, ps.lineIndentOf(i), i)
       b.endTree()
     elif branch.kind == tkKeyword and branch.s == "else":
       let hi = ps.lineEnd(i)
       let colon = ps.findColon(i, hi)
       b.addTree "else"
       ps.emitInfo(b, branch.line, branch.col, kw.line, kw.col, false)   # else = keyword pos
-      i = ps.emitBody(b, colon, refIndent, branch.line, branch.col, ps.lineIndentOf(i))
+      i = ps.emitBody(b, colon, refIndent, branch.line, branch.col, ps.lineIndentOf(i), i)
       b.endTree()
       break
     else:
@@ -407,7 +444,7 @@ proc parseWhile(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int 
   b.addTree "while"
   ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
   ps.parseExprRange(b, int32(kwIdx + 1), int32(colon), kw.line, kw.col)  # cond parent = while
-  result = ps.emitBody(b, colon, refIndent, kw.line, kw.col, ps.lineIndentOf(kwIdx))
+  result = ps.emitBody(b, colon, refIndent, kw.line, kw.col, ps.lineIndentOf(kwIdx), kwIdx)
   b.endTree()
 
 proc parseCase(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32): int =

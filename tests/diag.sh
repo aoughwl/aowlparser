@@ -454,6 +454,45 @@ for ok in 'let a = not (x == y)' 'let a = x != y' 'let a = not p and q == r'; do
     echo "FAIL: correct form '$ok' must NOT be flagged"; fail=1; }
 done
 
+# (4f9) nil-comparison — OPINION, own flag (--nil-comparison:warn), default OFF.
+printf 'let a = p == nil\n' > "$WORK/nl.nim"
+grep -q 'nil-comparison' <<<"$("$NP" check "$WORK/nl.nim" 2>&1)" && {
+  echo "FAIL: nil-comparison must be OFF by default"; fail=1; }
+for src in 'let a = p == nil' 'let a = p != nil' 'let a = nil == p'; do
+  printf "$src\n" > "$WORK/nl.nim"
+  grep -q 'nil-comparison' <<<"$("$NP" check --nil-comparison:warn "$WORK/nl.nim" 2>&1)" || {
+    echo "FAIL: --nil-comparison:warn should flag '$src'"; fail=1; }
+done
+
+# (4f10) yoda-condition — OPINION, own flag (--yoda:warn), default OFF. A literal on
+# the LEFT; must NOT fire on two literals, nor on a var on the left.
+printf 'let a = 0 == n\n' > "$WORK/yd.nim"
+grep -q 'yoda-condition' <<<"$("$NP" check "$WORK/yd.nim" 2>&1)" && {
+  echo "FAIL: yoda-condition must be OFF by default"; fail=1; }
+for src in 'let a = 0 == n' 'let a = "s" == name' 'let a = 3.5 != x'; do
+  printf "$src\n" > "$WORK/yd.nim"
+  grep -q 'yoda-condition' <<<"$("$NP" check --yoda:warn "$WORK/yd.nim" 2>&1)" || {
+    echo "FAIL: --yoda:warn should flag '$src'"; fail=1; }
+done
+for ok in 'let a = 1 == 2' 'let a = n == 0' 'let a = x == nil' 'let a = ok == true'; do
+  printf "$ok\n" > "$WORK/yd.nim"
+  grep -q 'yoda-condition' <<<"$("$NP" check --yoda:warn "$WORK/yd.nim" 2>&1)" && {
+    echo "FAIL: '$ok' must NOT be flagged as yoda-condition"; fail=1; }
+done
+
+# (4h) DIAGNOSTIC POSITIONING — regression guards for the fixes to imprecise spans.
+# expected-colon on a ONE-LINER points after the condition (before the statement
+# keyword), not at end-of-line; and the header/body split is handled once.
+printf 'if 4 == 2 return false\n' > "$WORK/pos.nim"
+out="$("$NP" check --diagnostics:json "$WORK/pos.nim" 2>&1)"
+grep -q '"code":"expected-colon"' <<<"$out" || { echo "FAIL: one-liner missing ':' not flagged"; fail=1; }
+grep -q '"col":9' <<<"$out" || { echo "FAIL: colon should point after the condition (col 9): $out"; fail=1; }
+# a colon-less header with an INDENTED body reports the missing ':' EXACTLY ONCE
+# (the duplicate-diagnostic bug), even nested in a routine body.
+printf 'proc f() =\n  if x\n    echo 1\n    echo 2\n' > "$WORK/pos.nim"
+n="$("$NP" check "$WORK/pos.nim" 2>&1 | grep -c 'expected-colon')"
+[ "$n" = "1" ] || { echo "FAIL: nested colon-less 'if' should report ONCE, got $n"; fail=1; }
+
 # (4f7d) simplify-boolean-return — OPT-IN (--idioms:warn). `if c: return true
 # else: return false` (and the result=/swap/inline variants) returns the condition.
 printf 'proc f(c: bool): bool =\n  if c:\n    return true\n  else:\n    return false\n' > "$WORK/sb.nim"
@@ -631,7 +670,12 @@ for bad in 'proc f()' 'func g(x: int)' 'iterator it(): int'; do
   grep -q 'missing-routine-equals' <<<"$out" || {
     echo "FAIL: '$bad' + body should report missing-routine-equals"; fail=1; }
   grep -q 'help: ' <<<"$out" || { echo "FAIL: missing '=' should carry a fix"; fail=1; }
-  grep -q 'declared here' <<<"$out" || { echo "FAIL: missing '=' should point at the header"; fail=1; }
+  # the PRIMARY marker sits on the signature (line 1, where the '=' belongs), not
+  # on the body's first line; the body is the RELATED note.
+  grep -qE ':1:[0-9]+: error\[missing-routine-equals\]' <<<"$out" || {
+    echo "FAIL: missing '=' should anchor on the signature line (1), got: $out"; fail=1; }
+  grep -q 'read as the body' <<<"$out" || {
+    echo "FAIL: missing '=' should relate to the body line"; fail=1; }
 done
 # valid forms that must stay silent: a real body (`=`), a bare forward decl, and
 # a magic/importc decl documented with an indented `##` comment.
