@@ -594,6 +594,7 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
         if k.s == rk: isRoutine = true
     if isRoutine:
       var depth = 0
+      var sawParams = false          # the value-param `)` has closed at depth 0
       var j = ai + 1
       while j < toks.len:
         let t2 = toks[j]
@@ -601,7 +602,9 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
         if t2.kind == tkParLe or t2.kind == tkBracketLe or t2.kind == tkCurlyLe:
           inc depth
         elif t2.kind == tkParRi or t2.kind == tkBracketRi or t2.kind == tkCurlyRi:
-          if depth > 0: dec depth
+          if depth > 0:
+            dec depth
+            if depth == 0 and t2.kind == tkParRi: sawParams = true
         elif depth == 0 and t2.kind == tkColon:
           break                                             # valid return-type ':'
         elif depth == 0 and t2.kind == tkOperator and t2.s == "=":
@@ -611,6 +614,22 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
             message: "'->' is not a Nim return type — write the type after ':'",
             line: t2.line, col: t2.col, endCol: t2.endCol,
             fix: "write the return type after ':' — proc f(): T")
+          break
+        elif depth == 0 and sawParams and t2.kind == tkIdent and
+             (t2.s == "throws" or t2.s == "where"):
+          # `proc f() throws IOError` (Java) / `proc f[T]() where T: int`
+          # (Rust/Swift/C#). After the value params, before the `:`/`=`, a bare
+          # identifier is never valid Nim — the effect set is a pragma
+          # `{.raises: [IOError].}` and a type constraint is `[T: Constraint]`.
+          let adv =
+            if t2.s == "throws":
+              "declare the effect with a pragma — '{.raises: [IOError].}'"
+            else:
+              "put the type constraint in the brackets — 'proc f[T: Constraint]()'"
+          result.add Diagnostic(severity: sevError, code: "foreign-routine-clause",
+            message: "'" & t2.s & "' is not a Nim routine clause — " & adv,
+            line: t2.line, col: t2.col, endCol: t2.endCol,
+            fix: adv)
           break
         inc j
     inc ai
