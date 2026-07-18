@@ -218,6 +218,17 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
                      ") in …' — you likely want 'notin'",
             line: n1.line, col: n1.col, endCol: toks[af].endCol,
             fix: "use 'x notin y' (or parenthesize: 'not (x in y)')")
+        elif af < toks.len and toks[af].kind == tkOperator and
+             (toks[af].s == "==" or toks[af].s == "!="):
+          # `not x == y` parses as `(not x) == y`; the migrant means `not (x == y)`,
+          # i.e. the OTHER comparison. Same unary-binds-tighter trap as `not … in`.
+          let want = if toks[af].s == "==": "!=" else: "=="
+          result.add Diagnostic(severity: sevHint, code: "not-compare-precedence",
+            message: "'not " & toks[nn].s & " " & toks[af].s & " …' means '(not " &
+                     toks[nn].s & ") " & toks[af].s & " …' — you likely want '" &
+                     want & "'",
+            line: n1.line, col: n1.col, endCol: toks[af].endCol,
+            fix: "use '" & want & "' (or parenthesize: 'not (x " & toks[af].s & " y)')")
   # `let`/`const` ALWAYS introduce a declaration, so the next significant token
   # must begin a name: an identifier, or `(` for a tuple unpack. Anything else —
   # a keyword (`let proc`), an operator, a literal, a closing bracket, EOF — is

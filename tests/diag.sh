@@ -438,6 +438,22 @@ for ok in 'let a = not (x in y)' 'let a = x notin y' 'let a = not p and q in r' 
     echo "FAIL: correct form '$ok' must NOT be flagged"; fail=1; }
 done
 
+# (4f7c) not-compare-precedence — OPT-IN (--idioms:warn). `not x == y` parses as
+# `(not x) == y`; the migrant means `not (x == y)`, i.e. `x != y`.
+for src in 'let a = not x == y' 'let a = not x != y' 'let a = not obj.f == z'; do
+  printf "$src\n" > "$WORK/nc.nim"
+  grep -q 'not-compare-precedence' <<<"$("$NP" check --idioms:warn "$WORK/nc.nim" 2>&1)" || {
+    echo "FAIL: --idioms:warn should flag '$src'"; fail=1; }
+done
+printf 'let a = not x == y\n' > "$WORK/nc.nim"
+grep -q 'not-compare-precedence' <<<"$("$NP" check "$WORK/nc.nim" 2>&1)" && {
+  echo "FAIL: not-compare-precedence must be OFF by default"; fail=1; }
+for ok in 'let a = not (x == y)' 'let a = x != y' 'let a = not p and q == r'; do
+  printf "$ok\n" > "$WORK/nc.nim"
+  grep -q 'not-compare-precedence' <<<"$("$NP" check --idioms:warn "$WORK/nc.nim" 2>&1)" && {
+    echo "FAIL: correct form '$ok' must NOT be flagged"; fail=1; }
+done
+
 # (4f8) float-equality — OPT-IN, own flag (--float-equality:warn), also in pedantic.
 printf 'let z = x == 3.14\n' > "$WORK/fe.nim"
 grep -q 'float-equality' <<<"$("$NP" check "$WORK/fe.nim" 2>&1)" && {
