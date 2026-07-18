@@ -118,6 +118,67 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
             message: "redundant trailing ';' — Nim separates statements by newline",
             line: t.line, col: t.col, endCol: t.endCol,
             fix: "remove the ';'")
+  # OPT-IN idiomatic lints on VALID code (`--idioms:warn`). These never change the
+  # emitted AIF and default OFF, so the zero-FP corpus stays clean. Each is a HINT:
+  # the code compiles, it just isn't how a Nim programmer would write it.
+  if opts.idiomsWarn or opts.floatEqWarn:
+    # A single scan over the `==`/`!=` operators feeds two INDEPENDENTLY-gated
+    # lints: the bool-literal compare (idiomsWarn) and the float-equality compare
+    # (floatEqWarn). Either flag alone activates its own branch.
+    for oi in 0 ..< toks.len:
+      let op = toks[oi]
+      if op.kind != tkOperator or (op.s != "==" and op.s != "!="): continue
+      # significant neighbours
+      var np = oi + 1
+      while np < toks.len and toks[np].kind == tkComment: inc np
+      var pp = oi - 1
+      while pp >= 0 and toks[pp].kind == tkComment: dec pp
+      # `x == true` / `x == false` / `x != true` / `x != false` — comparing to a
+      # bool LITERAL is always redundant (it only type-checks when x is a bool).
+      # `true`/`false` lex as identifiers, so match on the ident text.
+      var litTok = -1
+      if np < toks.len and toks[np].kind == tkIdent and
+         (toks[np].s == "true" or toks[np].s == "false"):
+        litTok = np
+      elif pp >= 0 and toks[pp].kind == tkIdent and
+         (toks[pp].s == "true" or toks[pp].s == "false"):
+        litTok = pp
+      if opts.idiomsWarn and litTok >= 0:
+        let lit = toks[litTok].s
+        # `== true` / `!= false` reduce to the expression; the other two need `not`.
+        let identity = (op.s == "==" and lit == "true") or
+                       (op.s == "!=" and lit == "false")
+        let advice =
+          if identity: "drop the '" & op.s & " " & lit & "' — use the expression itself"
+          else: "rewrite as 'not <expr>'"
+        result.add Diagnostic(severity: sevHint, code: "redundant-bool-literal",
+          message: "comparing to the bool literal '" & lit & "' is redundant",
+          line: op.line, col: op.col, endCol: op.endCol,
+          fix: advice)
+      # `x == 3.14` — exact float equality is unreliable. Gated SEPARATELY (it is
+      # noisier: exact-value math tests legitimately use it), so it rides its own
+      # flag and only fires when floatEqWarn is on.
+      elif opts.floatEqWarn and
+           ((np < toks.len and toks[np].kind == tkFloatLit) or
+            (pp >= 0 and toks[pp].kind == tkFloatLit)):
+        result.add Diagnostic(severity: sevHint, code: "float-equality",
+          message: "'" & op.s & "' on a float literal is unreliable — floats rarely compare exactly",
+          line: op.line, col: op.col, endCol: op.endCol,
+          fix: "compare with a tolerance, e.g. abs(a - b) < 1e-9, or use 'almostEqual'")
+    # `not not x` — a double negation. `not` is a keyword; two adjacent (ignoring
+    # comments) collapse to identity. Only doc-comment prose ever says "not not",
+    # and that lexes as tkComment, so it is never matched here. idiomsWarn only.
+    if opts.idiomsWarn:
+     for ni in 0 ..< toks.len:
+      let n1 = toks[ni]
+      if n1.kind != tkKeyword or n1.s != "not": continue
+      var nn = ni + 1
+      while nn < toks.len and toks[nn].kind == tkComment: inc nn
+      if nn < toks.len and toks[nn].kind == tkKeyword and toks[nn].s == "not":
+        result.add Diagnostic(severity: sevHint, code: "double-negation",
+          message: "'not not' is a redundant double negation",
+          line: n1.line, col: n1.col, endCol: toks[nn].endCol,
+          fix: "remove both 'not's (the value is unchanged)")
   # `let`/`const` ALWAYS introduce a declaration, so the next significant token
   # must begin a name: an identifier, or `(` for a tuple unpack. Anything else —
   # a keyword (`let proc`), an operator, a literal, a closing bracket, EOF — is
@@ -1087,6 +1148,18 @@ proc main() =
       of "warn": opts.semicolonWarn = true
       else:
         write stderr, "unknown --semicolons mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--idioms:"):
+      case afterColon(a)
+      of "warn": opts.idiomsWarn = true
+      else:
+        write stderr, "unknown --idioms mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--float-equality:"):
+      case afterColon(a)
+      of "warn": opts.floatEqWarn = true
+      else:
+        write stderr, "unknown --float-equality mode: " & afterColon(a) & "\n"
         usage()
     elif hasPrefix(a, "--bom:"):
       case afterColon(a)

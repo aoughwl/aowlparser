@@ -391,6 +391,51 @@ printf 'let a = 1; let b = 2\n' > "$WORK/sc.nim"
 grep -q 'redundant-semicolon' <<<"$("$NP" check --semicolons:warn "$WORK/sc.nim" 2>&1)" && {
   echo "FAIL: a mid-line separator ';' must NOT be flagged"; fail=1; }
 
+# (4f6) redundant-bool-literal — OPT-IN idiom lint (--idioms:warn). `x == true`,
+# `x != false`, `x == false`, `x != true` are all redundant bool compares.
+printf 'let z = ok == true\n' > "$WORK/id.nim"
+grep -q 'redundant-bool-literal' <<<"$("$NP" check "$WORK/id.nim" 2>&1)" && {
+  echo "FAIL: redundant-bool-literal must be OFF by default"; fail=1; }
+for src in 'let z = ok == true' 'let z = ok != false' 'let z = ok == false' \
+           'let z = ok != true' 'let z = true == ok'; do
+  printf "$src\n" > "$WORK/id.nim"
+  grep -q 'redundant-bool-literal' <<<"$("$NP" check --idioms:warn "$WORK/id.nim" 2>&1)" || {
+    echo "FAIL: --idioms:warn should flag '$src'"; fail=1; }
+done
+# must NOT fire on an identifier that merely STARTS with true/false, or a real compare
+for ok in 'let z = a == truthy' 'let z = a == b' 'let z = falsey == a'; do
+  printf "$ok\n" > "$WORK/id.nim"
+  grep -q 'redundant-bool-literal' <<<"$("$NP" check --idioms:warn "$WORK/id.nim" 2>&1)" && {
+    echo "FAIL: '$ok' must NOT be flagged as redundant-bool-literal"; fail=1; }
+done
+
+# (4f7) double-negation — OPT-IN (--idioms:warn). `not not x` collapses to x.
+printf 'let z = not not ready\n' > "$WORK/dn.nim"
+grep -q 'double-negation' <<<"$("$NP" check "$WORK/dn.nim" 2>&1)" && {
+  echo "FAIL: double-negation must be OFF by default"; fail=1; }
+grep -q 'double-negation' <<<"$("$NP" check --idioms:warn "$WORK/dn.nim" 2>&1)" || {
+  echo "FAIL: --idioms:warn should flag 'not not'"; fail=1; }
+# a single `not` is fine; 'not not' inside a comment/string is never a token match
+printf 'let z = not ready\n## does not not matter\n' > "$WORK/dn.nim"
+grep -q 'double-negation' <<<"$("$NP" check --idioms:warn "$WORK/dn.nim" 2>&1)" && {
+  echo "FAIL: a single 'not' (and 'not not' in a comment) must NOT be flagged"; fail=1; }
+
+# (4f8) float-equality — OPT-IN, own flag (--float-equality:warn), also in pedantic.
+printf 'let z = x == 3.14\n' > "$WORK/fe.nim"
+grep -q 'float-equality' <<<"$("$NP" check "$WORK/fe.nim" 2>&1)" && {
+  echo "FAIL: float-equality must be OFF by default"; fail=1; }
+grep -q 'float-equality' <<<"$("$NP" check --idioms:warn "$WORK/fe.nim" 2>&1)" && {
+  echo "FAIL: float-equality must NOT ride --idioms:warn (it has its own flag)"; fail=1; }
+for src in 'let z = x == 3.14' 'let z = x != 0.5' 'let z = 1.0 == x'; do
+  printf "$src\n" > "$WORK/fe.nim"
+  grep -q 'float-equality' <<<"$("$NP" check --float-equality:warn "$WORK/fe.nim" 2>&1)" || {
+    echo "FAIL: --float-equality:warn should flag '$src'"; fail=1; }
+done
+# an INTEGER literal compare is NOT float-equality
+printf 'let z = x == 3\n' > "$WORK/fe.nim"
+grep -q 'float-equality' <<<"$("$NP" check --float-equality:warn "$WORK/fe.nim" 2>&1)" && {
+  echo "FAIL: an integer compare must NOT be flagged as float-equality"; fail=1; }
+
 # (4g) lexer-level numeric/identifier errors nifler catches (found by the
 # Nim/tests differential). Each must fire on the bad form and stay silent on the
 # valid one.

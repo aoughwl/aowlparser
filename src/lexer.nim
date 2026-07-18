@@ -77,12 +77,18 @@ type
                             ## (Nim uses `and`/`or`); opt-in (default off).
     semicolonWarn*: bool    ## advisory: warn on a redundant trailing `;` (Nim
                             ## separates statements by newline); opt-in (default off).
+    idiomsWarn*: bool       ## advisory: idiomatic-Nim lints on VALID code — a
+                            ## redundant `== true`/`== false` bool compare, a
+                            ## `not not` double negation. Opt-in (default off).
+    floatEqWarn*: bool      ## advisory: flag `==`/`!=` against a float literal
+                            ## (unreliable; use a tolerance). Opt-in (default off).
 
 const
   defaultLexOptions* = LexOptions(tabPolicy: tpSpaces, tabWidth: 8, indentWidth: 0,
     finalNewlineRequire: false, newlinePolicy: nlAny, trailingWhitespaceWarn: false,
     bomPolicy: bomDefault, indentConsistency: false, tabStops: tsHard,
-    docComments: true, cOperatorsWarn: false, semicolonWarn: false)
+    docComments: true, cOperatorsWarn: false, semicolonWarn: false,
+    idiomsWarn: false, floatEqWarn: false)
 
 type
   Lexer = object
