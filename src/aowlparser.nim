@@ -538,6 +538,29 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
           message: "a 'converter' adds an implicit conversion — it surprises overloading",
           line: t.line, col: t.col, endCol: t.endCol,
           fix: "prefer an explicit conversion proc the caller opts into")
+  # OPINION: `addr` / `unsafeAddr` — taking a raw address bypasses Nim's memory
+  # safety; a project may want each one audited. `addr` is a keyword; `unsafeAddr`
+  # is a builtin (identifier) whose name already advertises the risk.
+  if opts.addrWarn:
+    for i in 0 ..< toks.len:
+      let t = toks[i]
+      let hit = (t.kind == tkKeyword and t.s == "addr") or
+                (t.kind == tkIdent and t.s == "unsafeAddr")
+      if hit:
+        result.add Diagnostic(severity: sevHint, code: "addr-of",
+          message: "'" & t.s & "' takes a raw address — audit this pointer use",
+          line: t.line, col: t.col, endCol: t.endCol,
+          fix: "keep the value by ref/var where possible instead of a raw pointer")
+  # OPINION: an `asm` inline-assembly block — maximally low-level and non-portable.
+  # `asm` is a keyword; its presence is the smell.
+  if opts.asmWarn:
+    for i in 0 ..< toks.len:
+      let t = toks[i]
+      if t.kind == tkKeyword and t.s == "asm":
+        result.add Diagnostic(severity: sevHint, code: "asm-block",
+          message: "inline 'asm' is non-portable and unchecked — audit it",
+          line: t.line, col: t.col, endCol: t.endCol,
+          fix: "prefer a Nim or C-FFI implementation where feasible")
   # `let`/`const` ALWAYS introduce a declaration, so the next significant token
   # must begin a name: an identifier, or `(` for a tuple unpack. Anything else —
   # a keyword (`let proc`), an operator, a literal, a closing bracket, EOF — is
@@ -1392,6 +1415,8 @@ proc usage() =
   write stderr, "  --bare-except:warn   hint on a bare 'except:' (catches everything)\n"
   write stderr, "  --cast:warn          hint on 'cast[T](x)' (unchecked reinterpret)\n"
   write stderr, "  --converter:warn     hint on a 'converter' definition (implicit conversion)\n"
+  write stderr, "  --addr:warn          hint on 'addr'/'unsafeAddr' (raw address-of)\n"
+  write stderr, "  --asm:warn           hint on an inline 'asm' block (non-portable)\n"
   write stderr, "  --bom:MODE         leading UTF-8 BOM handling (default: legacy skip):\n"
   write stderr, "                       strip   consume a BOM without shifting line-1 columns\n"
   write stderr, "                       reject  warn/error on a leading BOM\n"
@@ -1593,6 +1618,18 @@ proc main() =
       of "warn": opts.converterWarn = true
       else:
         write stderr, "unknown --converter mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--addr:"):
+      case afterColon(a)
+      of "warn": opts.addrWarn = true
+      else:
+        write stderr, "unknown --addr mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--asm:"):
+      case afterColon(a)
+      of "warn": opts.asmWarn = true
+      else:
+        write stderr, "unknown --asm mode: " & afterColon(a) & "\n"
         usage()
     elif hasPrefix(a, "--bom:"):
       case afterColon(a)

@@ -585,6 +585,23 @@ printf 'proc toInt(x: bool): int = 0\n' > "$WORK/cv.nim"
 grep -q 'converter-defined' <<<"$("$NP" check --converter:warn "$WORK/cv.nim" 2>&1)" && {
   echo "FAIL: a plain proc must NOT be flagged converter-defined"; fail=1; }
 
+# (4f19) addr-of — OPINION (--addr:warn), default OFF. 'addr' keyword + 'unsafeAddr'.
+printf 'let p = addr x\n' > "$WORK/ad.nim"
+grep -q 'addr-of' <<<"$("$NP" check "$WORK/ad.nim" 2>&1)" && {
+  echo "FAIL: addr-of must be OFF by default"; fail=1; }
+for src in 'let p = addr x' 'let p = unsafeAddr x'; do
+  printf "$src\n" > "$WORK/ad.nim"
+  grep -q 'addr-of' <<<"$("$NP" check --addr:warn "$WORK/ad.nim" 2>&1)" || {
+    echo "FAIL: --addr:warn should flag '$src'"; fail=1; }
+done
+
+# (4f20) asm-block — OPINION (--asm:warn), default OFF.
+printf 'asm """\n  nop\n"""\n' > "$WORK/as.nim"
+grep -q 'asm-block' <<<"$("$NP" check "$WORK/as.nim" 2>&1)" && {
+  echo "FAIL: asm-block must be OFF by default"; fail=1; }
+grep -q 'asm-block' <<<"$("$NP" check --asm:warn "$WORK/as.nim" 2>&1)" || {
+  echo "FAIL: --asm:warn should flag an asm block"; fail=1; }
+
 # (4h) DIAGNOSTIC POSITIONING — regression guards for the fixes to imprecise spans.
 # expected-colon on a ONE-LINER points after the condition (before the statement
 # keyword), not at end-of-line; and the header/body split is handled once.

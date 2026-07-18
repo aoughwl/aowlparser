@@ -102,6 +102,10 @@ type
                             ## project may want to audit. Config-gated.
     converterWarn*: bool    ## OPINION: flag a `converter` definition — implicit
                             ## conversions surprise overload resolution. Config-gated.
+    addrWarn*: bool         ## OPINION: flag `addr`/`unsafeAddr` — taking a raw
+                            ## address; a project may want it audited. Config-gated.
+    asmWarn*: bool          ## OPINION: flag an `asm` inline-assembly block — very
+                            ## low-level and non-portable. Config-gated.
 
 const
   defaultLexOptions* = LexOptions(tabPolicy: tpSpaces, tabWidth: 8, indentWidth: 0,
@@ -111,7 +115,7 @@ const
     idiomsWarn: false, floatEqWarn: false, nilStyleWarn: false, yodaWarn: false,
     redundantParensWarn: false, emptyStrWarn: false, echoWarn: false,
     rangeIndexWarn: false, broadExceptWarn: false, bareExceptWarn: false,
-    castWarn: false, converterWarn: false)
+    castWarn: false, converterWarn: false, addrWarn: false, asmWarn: false)
 
 type
   Lexer = object
