@@ -193,6 +193,21 @@ printf 'proc f() =\n  discard\n' > "$WORK/se.nim"
 grep -q 'stray-end' <<<"$("$NP" check "$WORK/se.nim" 2>&1)" && {
   echo "FAIL: valid code must NOT flag stray-end"; fail=1; }
 
+# (4f3f) c-brace-body — the C/Java/JS-style '{ }' block body ('proc f() { }').
+# Nim uses an indented body after '='. Must NOT flag a pragma '{.….}', a set
+# literal, or a term-rewriting template pattern ('template t{pat}(…)').
+for bad in 'proc f() {\n  discard\n}' 'proc g(): int {\n  discard\n}'; do
+  printf '%b\n' "$bad" > "$WORK/cb2.nim"
+  grep -q 'c-brace-body' <<<"$("$NP" check "$WORK/cb2.nim" 2>&1)" || {
+    echo "FAIL: C-brace body should flag c-brace-body ($bad)"; fail=1; }
+done
+for ok in 'proc f() {.inline.} = discard' 'proc f(): int {.inline.} = 1' \
+          'proc f(x = {1, 2}) = discard' 'template optZero{x * 0}(x: int): int = 0'; do
+  printf '%b\n' "$ok" > "$WORK/cb2.nim"
+  grep -q 'c-brace-body' <<<"$("$NP" check "$WORK/cb2.nim" 2>&1)" && {
+    echo "FAIL: valid '{' use must NOT flag c-brace-body ($ok)"; fail=1; }
+done
+
 # (4f4) c-style-operator — OPT-IN only (--c-operators:warn). '&&'/'||' are Nim's
 # 'and'/'or'. Off by default (they are definable operators); on, they warn but
 # never touch a real 'and'/'or'.

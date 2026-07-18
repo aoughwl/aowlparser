@@ -289,6 +289,47 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
             line: toks[n].line, col: toks[n].col, endCol: toks[n].endCol,
             fix: "write the generic parameters in brackets: proc f[T](…)")
     inc gi
+  # `{ … }` as a C/Java/JS-style block body (`proc f() { … }`). Nim uses an
+  # indented body after `=`. Flagged only in a routine HEADER, at depth 0, AFTER
+  # the params `)` and before the body `=` — and NEVER a pragma `{.…​.}` (whose `{`
+  # is followed by a `.`). Two valid `{`s are ruled out: a set literal `{1,2}`
+  # only appears in expression position (a default param value, depth > 0); and a
+  # TERM-REWRITING template pattern (`template t{x*0}(…)`) puts its `{` BEFORE the
+  # params — the `sawParams` guard requires a closed `)` first.
+  var cbi = 0
+  while cbi < toks.len:
+    let k = toks[cbi]
+    var isCbR = false
+    if k.kind == tkKeyword:
+      for rk in routineKw:
+        if k.s == rk: isCbR = true
+    if isCbR:
+      var depth = 0
+      var sawParams = false
+      var j = cbi + 1
+      while j < toks.len:
+        let t2 = toks[j]
+        if t2.kind == tkEof or t2.line != k.line: break
+        if t2.kind == tkCurlyLe:
+          if depth == 0:
+            let nextIsDot = j + 1 < toks.len and toks[j + 1].kind == tkDot
+            if (not nextIsDot) and sawParams:
+              result.add Diagnostic(severity: sevError, code: "c-brace-body",
+                message: "'{' is not a Nim block — use an indented body after '='",
+                line: t2.line, col: t2.col, endCol: t2.endCol,
+                fix: "replace the { … } braces with '= <indented body>'")
+              break
+            else: inc depth              # a `{.pragma.}` or a term-rewrite pattern
+          else: inc depth
+        elif t2.kind == tkParLe or t2.kind == tkBracketLe:
+          inc depth
+        elif t2.kind == tkParRi or t2.kind == tkBracketRi or t2.kind == tkCurlyRi:
+          if depth > 0:
+            dec depth
+            if depth == 0 and t2.kind == tkParRi: sawParams = true
+        elif depth == 0 and t2.kind == tkOperator and t2.s == "=": break
+        inc j
+    inc cbi
   # `->` as a return-type arrow (`proc f() -> int`, a Rust/Python-3/C++ habit).
   # Nim writes the return type after a colon: `proc f(): int`. Found via the nifler
   # differential. Delicate: `->` is ALSO the std/sugar lambda-type operator
