@@ -314,14 +314,16 @@ done
 # (4f3l) foreign-routine-clause — a Java 'throws' / Rust-Swift-C# 'where' clause on
 # a routine header. Nim uses a '{.raises.}' pragma and '[T: Constraint]' generics.
 # Must NOT flag a routine NAMED throws/where, a real return type, or a constraint.
-for bad in 'proc f() throws IOError = discard' 'proc f[T](x: T) where T: int = discard'; do
+for bad in 'proc f() throws IOError = discard' 'proc f[T](x: T) where T: int = discard' \
+           'proc f() override = discard' 'proc f() noexcept = discard'; do
   printf '%b\n' "$bad" > "$WORK/rc.nim"
   grep -q 'foreign-routine-clause' <<<"$("$NP" check "$WORK/rc.nim" 2>&1)" || {
     echo "FAIL: '$bad' should flag foreign-routine-clause"; fail=1; }
 done
 for ok in 'proc f() = discard' 'proc f(): int = 1' 'proc throws() = discard' \
           'proc where(x: int) = discard' 'proc f[T: int](x: T) = discard' \
-          'proc f() {.raises: [].} = discard' 'let where = 5'; do
+          'proc f() {.raises: [].} = discard' 'let where = 5' \
+          'proc override() = discard' 'proc noexcept(x: int) = discard'; do
   printf '%b\n' "$ok" > "$WORK/rc.nim"
   grep -q 'foreign-routine-clause' <<<"$("$NP" check "$WORK/rc.nim" 2>&1)" && {
     echo "FAIL: valid '$ok' must NOT flag foreign-routine-clause"; fail=1; }

@@ -690,16 +690,19 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
             fix: "write the return type after ':' — proc f(): T")
           break
         elif depth == 0 and sawParams and t2.kind == tkIdent and
-             (t2.s == "throws" or t2.s == "where"):
-          # `proc f() throws IOError` (Java) / `proc f[T]() where T: int`
-          # (Rust/Swift/C#). After the value params, before the `:`/`=`, a bare
-          # identifier is never valid Nim — the effect set is a pragma
-          # `{.raises: [IOError].}` and a type constraint is `[T: Constraint]`.
+             (t2.s == "throws" or t2.s == "where" or t2.s == "override" or
+              t2.s == "noexcept"):
+          # A foreign routine suffix, in the always-invalid position after the value
+          # params and before the `:`/`=`: Java `throws` (Nim: `{.raises: [E].}`),
+          # Rust/Swift/C# `where` (Nim: `[T: Constraint]`), C++/Java/C# `override`
+          # (Nim dispatch is `method`; an override is otherwise implicit) and C++
+          # `noexcept` (Nim: `{.raises: [].}`).
           let adv =
-            if t2.s == "throws":
-              "declare the effect with a pragma — '{.raises: [IOError].}'"
-            else:
-              "put the type constraint in the brackets — 'proc f[T: Constraint]()'"
+            case t2.s
+            of "throws": "declare the effect with a pragma — '{.raises: [IOError].}'"
+            of "where":  "put the type constraint in the brackets — 'proc f[T: Constraint]()'"
+            of "override": "Nim needs no 'override' — use 'method' for dynamic dispatch"
+            else:        "declare no exceptions with a pragma — '{.raises: [].}'"
           result.add Diagnostic(severity: sevError, code: "foreign-routine-clause",
             message: "'" & t2.s & "' is not a Nim routine clause — " & adv,
             line: t2.line, col: t2.col, endCol: t2.endCol,
