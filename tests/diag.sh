@@ -480,6 +480,80 @@ for ok in 'let a = 1 == 2' 'let a = n == 0' 'let a = x == nil' 'let a = ok == tr
     echo "FAIL: '$ok' must NOT be flagged as yoda-condition"; fail=1; }
 done
 
+# (4f11) redundant-parens-condition — OPINION (--redundant-parens:warn), default OFF.
+# Fires only when the parens wrap the WHOLE condition; a load-bearing group
+# (`(let y = …; …)`, a tuple) or a sub-expression is never flagged.
+printf 'if (x == 5):\n  discard\n' > "$WORK/rp.nim"
+grep -q 'redundant-parens-condition' <<<"$("$NP" check "$WORK/rp.nim" 2>&1)" && {
+  echo "FAIL: redundant-parens-condition must be OFF by default"; fail=1; }
+for src in 'if (x == 5):' 'elif (a or b):' 'while (running):' 'when (defined(x)):'; do
+  printf "$src\n  discard\n" > "$WORK/rp.nim"
+  grep -q 'redundant-parens-condition' <<<"$("$NP" check --redundant-parens:warn "$WORK/rp.nim" 2>&1)" || {
+    echo "FAIL: --redundant-parens:warn should flag '$src'"; fail=1; }
+done
+for ok in 'if (let y = f(); y != 0):' 'if (a or b) and c:' 'if f(x):' 'if (a, b) == t:'; do
+  printf "$ok\n  discard\n" > "$WORK/rp.nim"
+  grep -q 'redundant-parens-condition' <<<"$("$NP" check --redundant-parens:warn "$WORK/rp.nim" 2>&1)" && {
+    echo "FAIL: '$ok' must NOT be flagged redundant-parens (load-bearing/partial)"; fail=1; }
+done
+
+# (4f12) empty-string-concat — OPINION (--empty-string:warn), default OFF.
+printf 'let s = a & ""\n' > "$WORK/es.nim"
+grep -q 'empty-string-concat' <<<"$("$NP" check "$WORK/es.nim" 2>&1)" && {
+  echo "FAIL: empty-string-concat must be OFF by default"; fail=1; }
+for src in 'let s = a & ""' 'let s = "" & a'; do
+  printf "$src\n" > "$WORK/es.nim"
+  grep -q 'empty-string-concat' <<<"$("$NP" check --empty-string:warn "$WORK/es.nim" 2>&1)" || {
+    echo "FAIL: --empty-string:warn should flag '$src'"; fail=1; }
+done
+for ok in 'let s = a & b' 'let s = a & "x"'; do
+  printf "$ok\n" > "$WORK/es.nim"
+  grep -q 'empty-string-concat' <<<"$("$NP" check --empty-string:warn "$WORK/es.nim" 2>&1)" && {
+    echo "FAIL: '$ok' must NOT be flagged empty-string-concat"; fail=1; }
+done
+
+# (4f13) debug-echo — OPINION (--debug-echo:warn), default OFF. Statement position only.
+printf 'echo "hi"\n' > "$WORK/de.nim"
+grep -q 'debug-echo' <<<"$("$NP" check "$WORK/de.nim" 2>&1)" && {
+  echo "FAIL: debug-echo must be OFF by default"; fail=1; }
+grep -q 'debug-echo' <<<"$("$NP" check --debug-echo:warn "$WORK/de.nim" 2>&1)" || {
+  echo "FAIL: --debug-echo:warn should flag a bare echo"; fail=1; }
+printf 'let e = echoServer\n' > "$WORK/de.nim"
+grep -q 'debug-echo' <<<"$("$NP" check --debug-echo:warn "$WORK/de.nim" 2>&1)" && {
+  echo "FAIL: 'echoServer' identifier must NOT be flagged debug-echo"; fail=1; }
+
+# (4f14) manual-range-index — OPINION (--range-index:warn), default OFF. Only when
+# the range end literally ends in a binary '- 1'.
+printf 'for i in 0 .. a.len - 1:\n  discard\n' > "$WORK/ri.nim"
+grep -q 'manual-range-index' <<<"$("$NP" check "$WORK/ri.nim" 2>&1)" && {
+  echo "FAIL: manual-range-index must be OFF by default"; fail=1; }
+for src in 'for i in 0 .. a.len - 1:' 'for i in 0..n-1:'; do
+  printf "$src\n  discard\n" > "$WORK/ri.nim"
+  grep -q 'manual-range-index' <<<"$("$NP" check --range-index:warn "$WORK/ri.nim" 2>&1)" || {
+    echo "FAIL: --range-index:warn should flag '$src'"; fail=1; }
+done
+for ok in 'for i in 0 .. n:' 'for i in 0 .. f(a - 1):'; do
+  printf "$ok\n  discard\n" > "$WORK/ri.nim"
+  grep -q 'manual-range-index' <<<"$("$NP" check --range-index:warn "$WORK/ri.nim" 2>&1)" && {
+    echo "FAIL: '$ok' must NOT be flagged manual-range-index"; fail=1; }
+done
+
+# (4f15) broad-exception — OPINION (--broad-exception:warn), default OFF. Fires on
+# `except Exception` and `newException(Exception, …)`; never on CatchableError.
+printf 'try:\n  discard\nexcept Exception:\n  discard\n' > "$WORK/bx.nim"
+grep -q 'broad-exception' <<<"$("$NP" check "$WORK/bx.nim" 2>&1)" && {
+  echo "FAIL: broad-exception must be OFF by default"; fail=1; }
+grep -q 'broad-exception' <<<"$("$NP" check --broad-exception:warn "$WORK/bx.nim" 2>&1)" || {
+  echo "FAIL: --broad-exception:warn should flag 'except Exception'"; fail=1; }
+printf 'raise newException(Exception, "x")\n' > "$WORK/bx.nim"
+grep -q 'broad-exception' <<<"$("$NP" check --broad-exception:warn "$WORK/bx.nim" 2>&1)" || {
+  echo "FAIL: --broad-exception:warn should flag newException(Exception, …)"; fail=1; }
+for ok in 'except CatchableError:' 'raise newException(ValueError, "x")'; do
+  printf "try:\n  discard\n%s\n  discard\n" "$ok" > "$WORK/bx.nim"
+  grep -q 'broad-exception' <<<"$("$NP" check --broad-exception:warn "$WORK/bx.nim" 2>&1)" && {
+    echo "FAIL: '$ok' must NOT be flagged broad-exception"; fail=1; }
+done
+
 # (4h) DIAGNOSTIC POSITIONING — regression guards for the fixes to imprecise spans.
 # expected-colon on a ONE-LINER points after the condition (before the statement
 # keyword), not at end-of-line; and the header/body split is handled once.

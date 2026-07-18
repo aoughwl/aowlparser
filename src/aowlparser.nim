@@ -355,6 +355,151 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
                  " " & elseBool & "' just returns the condition — " & lead & "it directly",
         line: kw.line, col: kw.col, endCol: kw.endCol,
         fix: advice)
+  # OPINION: `if (cond):` — a condition wrapped in parens that span the WHOLE
+  # condition. Nim needs no parens around a control-flow condition, so this is a
+  # C/Java/Python habit. We fire ONLY when the `(` immediately follows the keyword
+  # and its MATCHING `)` is immediately followed by `:` (or `,`/`do`-less) at
+  # depth 0 — i.e. the parens wrap the entire condition, not a sub-expression like
+  # `if (a or b) and c:`. Zero-FP as a detection (the parens are provably
+  # redundant); an OPINION because some prefer them for clarity.
+  if opts.redundantParensWarn:
+    for i in 0 ..< toks.len:
+      let kw = toks[i]
+      if kw.kind != tkKeyword or
+         (kw.s != "if" and kw.s != "elif" and kw.s != "while" and kw.s != "when"):
+        continue
+      # next significant token must be `(`
+      var op = i + 1
+      while op < toks.len and toks[op].kind == tkComment: inc op
+      if op >= toks.len or toks[op].kind != tkParLe: continue
+      # find its match — and note whether the parens are LOAD-BEARING: a stmt-list
+      # expr `(a; b)`, a declaration `(let x = e; …)`, or a tuple `(a, b)` all NEED
+      # the parens, so a `;`/`,`/`let`/`var`/`const` at the paren's OWN depth means
+      # "not redundant" and we must not advise dropping them.
+      var depth = 1
+      var m = op + 1
+      var loadBearing = false
+      while m < toks.len and depth > 0:
+        let tk = toks[m].kind
+        if tk == tkParLe or tk == tkBracketLe or tk == tkCurlyLe: inc depth
+        elif tk == tkParRi or tk == tkBracketRi or tk == tkCurlyRi: dec depth
+        elif depth == 1 and (tk == tkSemicolon or tk == tkComma): loadBearing = true
+        elif depth == 1 and tk == tkKeyword and
+             (toks[m].s == "let" or toks[m].s == "var" or toks[m].s == "const"):
+          loadBearing = true
+        if depth == 0: break
+        inc m
+      if depth != 0 or m >= toks.len or loadBearing: continue
+      # the `)` must be immediately followed by `:` — then the parens wrapped the
+      # entire condition. (A call like `if (f)(x):` has a token between `)` and `:`.)
+      var af = m + 1
+      while af < toks.len and toks[af].kind == tkComment: inc af
+      if af >= toks.len or toks[af].kind != tkColon: continue
+      result.add Diagnostic(severity: sevHint, code: "redundant-parens-condition",
+        message: "'" & kw.s & "' needs no parentheses around its condition in Nim",
+        line: toks[op].line, col: toks[op].col, endCol: toks[op].endCol,
+        fix: "drop the outer '(' … ')'")
+  # OPINION: `s & ""` or `"" & s` — concatenating an empty string literal is a
+  # no-op. `&` is the string/seq concat operator; an empty `""` on either side of
+  # it contributes nothing. Zero-FP: an empty string literal is unambiguous.
+  if opts.emptyStrWarn:
+    for i in 0 ..< toks.len:
+      let o = toks[i]
+      if o.kind != tkOperator or o.s != "&": continue
+      var np = i + 1
+      while np < toks.len and toks[np].kind == tkComment: inc np
+      var pp = i - 1
+      while pp >= 0 and toks[pp].kind == tkComment: dec pp
+      let emptyR = np < toks.len and toks[np].kind == tkStrLit and toks[np].s.len == 0
+      let emptyL = pp >= 0 and toks[pp].kind == tkStrLit and toks[pp].s.len == 0
+      if emptyR or emptyL:
+        result.add Diagnostic(severity: sevHint, code: "empty-string-concat",
+          message: "concatenating an empty string \"\" with '&' is a no-op",
+          line: o.line, col: o.col, endCol: o.endCol,
+          fix: "drop the empty \"\" (and the '&')")
+  # OPINION: a bare `echo` statement — a debug print a project may want out of
+  # committed code. `echo` lexes as an identifier; we fire only when it BEGINS a
+  # statement (first significant token on its line — `indent >= 0`), so `discard
+  # echo …` or `x = echo` (never valid, but) and mid-expression uses don't match.
+  if opts.echoWarn:
+    for i in 0 ..< toks.len:
+      let e = toks[i]
+      if e.kind != tkIdent or e.s != "echo" or e.indent < 0: continue
+      result.add Diagnostic(severity: sevHint, code: "debug-echo",
+        message: "'echo' statement — a debug print; consider a logging facility",
+        line: e.line, col: e.col, endCol: e.endCol,
+        fix: "remove the 'echo' or route it through your logger")
+  # OPINION: `0 .. n - 1` — an inclusive range whose end is `<expr> - 1`. Nim's
+  # half-open `0 ..< n` says exactly the same with no off-by-one to get wrong. We
+  # fire only when the range end (from `..` to its depth-0 terminator `:`/`,`/`]`/
+  # `)`/`}`/newline) ENDS in a binary `- 1`. Zero-FP: `..` then `… - 1` at the end
+  # is provably equal to `..< …`.
+  if opts.rangeIndexWarn:
+    for i in 0 ..< toks.len:
+      let o = toks[i]
+      if o.kind != tkOperator or o.s != "..": continue
+      # collect the range-end tokens (depth-aware) until a depth-0 terminator
+      var depth = 0
+      var lastSig = -1        # last significant token index
+      var prevSig = -1        # the one before it
+      var j = i + 1
+      var scanning = true
+      while j < toks.len and scanning:
+        let t = toks[j]
+        if t.kind == tkComment:
+          inc j
+        elif t.kind == tkEof:
+          scanning = false
+        elif depth == 0 and lastSig >= 0 and t.line != o.line:
+          scanning = false
+        elif t.kind == tkParLe or t.kind == tkBracketLe or t.kind == tkCurlyLe:
+          inc depth
+          prevSig = lastSig; lastSig = j; inc j
+        elif t.kind == tkParRi or t.kind == tkBracketRi or t.kind == tkCurlyRi:
+          if depth == 0: scanning = false
+          else:
+            dec depth
+            prevSig = lastSig; lastSig = j; inc j
+        elif depth == 0 and (t.kind == tkColon or t.kind == tkComma):
+          scanning = false
+        else:
+          prevSig = lastSig; lastSig = j; inc j
+      # last two significant tokens must be `-` (binary op) then `1` (int literal)
+      if lastSig >= 0 and prevSig >= 0 and
+         toks[lastSig].kind == tkIntLit and toks[lastSig].s == "1" and
+         toks[prevSig].kind == tkOperator and toks[prevSig].s == "-":
+        result.add Diagnostic(severity: sevHint, code: "manual-range-index",
+          message: "'.. n - 1' — Nim's half-open '..< n' avoids the off-by-one",
+          line: o.line, col: o.col, endCol: o.endCol,
+          fix: "use '..<' and drop the '- 1'")
+  # OPINION: catching or raising the base `Exception` — too broad (it also catches
+  # Defects, which signal bugs you should not swallow). `except Exception` and
+  # `newException(Exception, …)` both name it explicitly, so this is zero-FP as a
+  # detection; the recommended base is `CatchableError` (or a specific type).
+  if opts.broadExceptWarn:
+    for i in 0 ..< toks.len:
+      let t = toks[i]
+      # `except Exception`
+      if t.kind == tkKeyword and t.s == "except":
+        var n = i + 1
+        while n < toks.len and toks[n].kind == tkComment: inc n
+        if n < toks.len and toks[n].kind == tkIdent and toks[n].s == "Exception":
+          result.add Diagnostic(severity: sevHint, code: "broad-exception",
+            message: "'except Exception' is too broad — it also catches Defects",
+            line: toks[n].line, col: toks[n].col, endCol: toks[n].endCol,
+            fix: "catch 'CatchableError' or a specific exception type")
+      # `newException(Exception, …)`
+      elif t.kind == tkIdent and t.s == "newException":
+        var n = i + 1
+        while n < toks.len and toks[n].kind == tkComment: inc n
+        if n < toks.len and toks[n].kind == tkParLe:
+          var a = n + 1
+          while a < toks.len and toks[a].kind == tkComment: inc a
+          if a < toks.len and toks[a].kind == tkIdent and toks[a].s == "Exception":
+            result.add Diagnostic(severity: sevHint, code: "broad-exception",
+              message: "raising the base 'Exception' is too broad — use a specific type",
+              line: toks[a].line, col: toks[a].col, endCol: toks[a].endCol,
+              fix: "raise a specific exception type (e.g. ValueError)")
   # `let`/`const` ALWAYS introduce a declaration, so the next significant token
   # must begin a name: an identifier, or `(` for a tuple unpack. Anything else —
   # a keyword (`let proc`), an operator, a literal, a closing bracket, EOF — is
@@ -1195,6 +1340,17 @@ proc usage() =
   write stderr, "  --c-operators:warn   warn on the C boolean operators && / || (use and/or;\n"
   write stderr, "                       default off; advisory only)\n"
   write stderr, "  --semicolons:warn    warn on a redundant trailing ';' (default off)\n"
+  write stderr, "  --idioms:warn        idiomatic-Nim hints on valid code (redundant\n"
+  write stderr, "                       == true / not not / not-in-precedence / boolean-return)\n"
+  write stderr, "  --float-equality:warn  hint on exact ==/!= against a float literal\n"
+  write stderr, "  OPINION lints (off by default; each its own flag, config-gated):\n"
+  write stderr, "  --nil-comparison:warn  hint on 'x == nil' (a project may prefer isNil)\n"
+  write stderr, "  --yoda:warn          hint on a literal on the left of == ('0 == x')\n"
+  write stderr, "  --redundant-parens:warn  hint on 'if (cond):' (Nim needs no parens)\n"
+  write stderr, "  --empty-string:warn  hint on 's & \"\"' (concat with empty string is a no-op)\n"
+  write stderr, "  --debug-echo:warn    hint on a bare 'echo' statement (a debug print)\n"
+  write stderr, "  --range-index:warn   hint on '0 .. n - 1' (prefer half-open '0 ..< n')\n"
+  write stderr, "  --broad-exception:warn  hint on 'except Exception'/newException(Exception, …)\n"
   write stderr, "  --bom:MODE         leading UTF-8 BOM handling (default: legacy skip):\n"
   write stderr, "                       strip   consume a BOM without shifting line-1 columns\n"
   write stderr, "                       reject  warn/error on a leading BOM\n"
@@ -1348,6 +1504,36 @@ proc main() =
       of "warn": opts.yodaWarn = true
       else:
         write stderr, "unknown --yoda mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--redundant-parens:"):
+      case afterColon(a)
+      of "warn": opts.redundantParensWarn = true
+      else:
+        write stderr, "unknown --redundant-parens mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--empty-string:"):
+      case afterColon(a)
+      of "warn": opts.emptyStrWarn = true
+      else:
+        write stderr, "unknown --empty-string mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--debug-echo:"):
+      case afterColon(a)
+      of "warn": opts.echoWarn = true
+      else:
+        write stderr, "unknown --debug-echo mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--range-index:"):
+      case afterColon(a)
+      of "warn": opts.rangeIndexWarn = true
+      else:
+        write stderr, "unknown --range-index mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--broad-exception:"):
+      case afterColon(a)
+      of "warn": opts.broadExceptWarn = true
+      else:
+        write stderr, "unknown --broad-exception mode: " & afterColon(a) & "\n"
         usage()
     elif hasPrefix(a, "--bom:"):
       case afterColon(a)

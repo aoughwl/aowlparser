@@ -86,13 +86,25 @@ type
                             ## Off by default; config-gated (`[rules]`).
     yodaWarn*: bool         ## OPINION: flag a literal on the left of `==`/`!=`
                             ## (a 'yoda' compare). Off by default; config-gated.
+    redundantParensWarn*: bool  ## OPINION: flag `if (cond):` — a wrapped condition
+                            ## needs no parens in Nim. Off by default; config-gated.
+    emptyStrWarn*: bool     ## OPINION: flag `s & ""` / `"" & s` — concatenating an
+                            ## empty string literal is a no-op. Config-gated.
+    echoWarn*: bool         ## OPINION: flag a bare `echo` statement (a debug print a
+                            ## project may want out of committed code). Config-gated.
+    rangeIndexWarn*: bool   ## OPINION: flag `0 .. n - 1` — Nim's half-open `0 ..< n`
+                            ## says the same without the off-by-one. Config-gated.
+    broadExceptWarn*: bool  ## OPINION: flag `except Exception` / `newException(
+                            ## Exception, …)` — too broad (catches Defects). Config-gated.
 
 const
   defaultLexOptions* = LexOptions(tabPolicy: tpSpaces, tabWidth: 8, indentWidth: 0,
     finalNewlineRequire: false, newlinePolicy: nlAny, trailingWhitespaceWarn: false,
     bomPolicy: bomDefault, indentConsistency: false, tabStops: tsHard,
     docComments: true, cOperatorsWarn: false, semicolonWarn: false,
-    idiomsWarn: false, floatEqWarn: false, nilStyleWarn: false, yodaWarn: false)
+    idiomsWarn: false, floatEqWarn: false, nilStyleWarn: false, yodaWarn: false,
+    redundantParensWarn: false, emptyStrWarn: false, echoWarn: false,
+    rangeIndexWarn: false, broadExceptWarn: false)
 
 type
   Lexer = object
