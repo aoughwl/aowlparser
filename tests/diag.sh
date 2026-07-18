@@ -111,6 +111,20 @@ for bad in 'let x == 5' 'const C == 5' 'let x: int == 5' 'let (a, b) == p' 'var 
   grep -q 'comparison-in-binding' <<<"$("$NP" check "$WORK/cb.nim" 2>&1)" || {
     echo "FAIL: '$bad' should flag comparison-in-binding"; fail=1; }
 done
+# (4f2b) walrus-in-binding — the Pascal/Go ':=' assignment in a binding
+# ('let x := 5'). Found via the nifler differential (nifler rejects it, aowlparser
+# was silent). ':=' lexes as one operator, distinct from a ':' type annotation.
+for bad in 'let x := 5' 'const C := 5' 'var v := 5'; do
+  printf '%s\n' "$bad" > "$WORK/cb.nim"
+  grep -q 'walrus-in-binding' <<<"$("$NP" check "$WORK/cb.nim" 2>&1)" || {
+    echo "FAIL: '$bad' should flag walrus-in-binding"; fail=1; }
+done
+for ok in 'let x: int = 5' 'let x = 5'; do
+  printf '%s\n' "$ok" > "$WORK/cb.nim"
+  grep -q 'walrus-in-binding' <<<"$("$NP" check "$WORK/cb.nim" 2>&1)" && {
+    echo "FAIL: '$ok' must NOT flag walrus-in-binding"; fail=1; }
+done
+
 # 'var' as a TYPE MODIFIER (not a binding) must never flag — it is only a binding
 # when it starts its line.
 for ok in 'let x = a == b' 'const C = (1 == 1)' 'let ok = f(x == y)' 'let z = 1' \

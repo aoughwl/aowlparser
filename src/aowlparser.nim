@@ -220,6 +220,15 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
           line: t2.line, col: t2.col, endCol: t2.endCol,
           fix: "did you mean '='?")
         break
+      elif depth == 0 and t2.kind == tkOperator and t2.s == ":=":
+        # `:=` is the Pascal/Go assignment; Nim binds with a plain `=`. (`:=`
+        # lexes as ONE operator, distinct from a `:` type annotation, which is a
+        # colon token — so `let x: int = 5` is never confused with `let x := 5`.)
+        result.add Diagnostic(severity: sevError, code: "walrus-in-binding",
+          message: "':=' assigns in Pascal/Go; a Nim '" & k.s & "' binding uses '='",
+          line: t2.line, col: t2.col, endCol: t2.endCol,
+          fix: "did you mean '='?")
+        break
       inc j
   # `else if` is not Nim — `else` must be followed by `:`, and the condition-chain
   # keyword is `elif`. Two ADJACENT keyword tokens `else` then `if` on the same
