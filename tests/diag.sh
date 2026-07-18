@@ -171,6 +171,18 @@ for ok in 'let ip = "::1"' 'let s = "a::b"' 'let x: int = 5' 'proc f(): int = 1'
     echo "FAIL: '$ok' must NOT flag double-colon"; fail=1; }
 done
 
+# (4f3d) angle-bracket-generics — the C++/Java/Rust/TS habit ('proc f<T>()').
+# Nim generics use '[T]'. Flagged only right after a routine NAME; defining the
+# '<' operator ('proc `<`') and ordinary comparisons must stay clean.
+printf 'proc f<T>(x: T) = discard\n' > "$WORK/ag.nim"
+grep -q 'angle-bracket-generics' <<<"$("$NP" check "$WORK/ag.nim" 2>&1)" || {
+  echo "FAIL: 'proc f<T>()' should flag angle-bracket-generics"; fail=1; }
+for ok in 'proc f[T](x: T) = discard' 'proc `<`(a, b: int): bool = a < b' 'let z = a < b' 'func cmp[T](a: T): int = 0'; do
+  printf '%b\n' "$ok" > "$WORK/ag.nim"
+  grep -q 'angle-bracket-generics' <<<"$("$NP" check "$WORK/ag.nim" 2>&1)" && {
+    echo "FAIL: '$ok' must NOT flag angle-bracket-generics"; fail=1; }
+done
+
 # (4f4) c-style-operator — OPT-IN only (--c-operators:warn). '&&'/'||' are Nim's
 # 'and'/'or'. Off by default (they are definable operators); on, they warn but
 # never touch a real 'and'/'or'.

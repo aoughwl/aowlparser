@@ -243,6 +243,37 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
         message: "'::' is not valid Nim — use '.' to qualify (a.b), or a single ':'",
         line: t.line, col: t.col, endCol: t.endCol,
         fix: "use '.' to qualify (std.vector) or ':' for a type annotation")
+  # `<T>` angle-bracket generics on a routine (`proc f<T>()`, a C++/Java/Rust/TS
+  # habit). Nim uses `[T]`. Found via the nifler differential. `<` is the compare
+  # operator, so we flag it ONLY immediately after a routine NAME (after the
+  # keyword, its name, and an optional `*` export) — never a comparison. Defining
+  # the `<` operator is safe: its name is a backtick ident (`proc \`<\``), so the
+  # token right after it is `(`, not a `<` operator.
+  const routineKw = ["proc", "func", "method", "iterator", "converter",
+                     "template", "macro"]
+  var gi = 0
+  while gi < toks.len:
+    let k = toks[gi]
+    var isRoutine = false
+    if k.kind == tkKeyword:
+      for rk in routineKw:
+        if k.s == rk: isRoutine = true
+    if isRoutine:
+      var j = gi + 1
+      while j < toks.len and toks[j].kind == tkComment: inc j
+      # the name must be a plain identifier (a backtick operator name is also
+      # tkIdent, but is followed by `(`, not `<`)
+      if j < toks.len and toks[j].kind == tkIdent and toks[j].line == k.line:
+        var n = j + 1
+        if n < toks.len and toks[n].kind == tkOperator and toks[n].s == "*":
+          inc n                                    # skip an export `*`
+        if n < toks.len and toks[n].kind == tkOperator and toks[n].s == "<" and
+           toks[n].line == k.line:
+          result.add Diagnostic(severity: sevError, code: "angle-bracket-generics",
+            message: "Nim generics use '[T]', not '<T>'",
+            line: toks[n].line, col: toks[n].col, endCol: toks[n].endCol,
+            fix: "write the generic parameters in brackets: proc f[T](…)")
+    inc gi
   # `->` as a return-type arrow (`proc f() -> int`, a Rust/Python-3/C++ habit).
   # Nim writes the return type after a colon: `proc f(): int`. Found via the nifler
   # differential. Delicate: `->` is ALSO the std/sugar lambda-type operator
@@ -251,9 +282,7 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
   # `->` in a return TYPE (`proc f(): (int) -> int`) sits after that `:` and is
   # never reached; a `->` defined/used as an operator (`macro \`->\``, a lambda in
   # a body) is not at header depth-0 either. Restricted to the keyword's own line
-  # so a multi-line body can't be misread.
-  const routineKw = ["proc", "func", "method", "iterator", "converter",
-                     "template", "macro"]
+  # so a multi-line body can't be misread. (routineKw is defined above.)
   var ai = 0
   while ai < toks.len:
     let k = toks[ai]
