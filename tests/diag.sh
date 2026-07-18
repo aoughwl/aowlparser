@@ -420,6 +420,24 @@ printf 'let z = not ready\n## does not not matter\n' > "$WORK/dn.nim"
 grep -q 'double-negation' <<<"$("$NP" check --idioms:warn "$WORK/dn.nim" 2>&1)" && {
   echo "FAIL: a single 'not' (and 'not not' in a comment) must NOT be flagged"; fail=1; }
 
+# (4f7b) not-in-precedence — OPT-IN (--idioms:warn). `not x in y` parses as
+# `(not x) in y`; the Python migrant wants `x notin y`.
+for src in 'let a = not x in y' 'let a = not obj.field in s' 'let a = not f(a) in s'; do
+  printf "$src\n" > "$WORK/np.nim"
+  grep -q 'not-in-precedence' <<<"$("$NP" check --idioms:warn "$WORK/np.nim" 2>&1)" || {
+    echo "FAIL: --idioms:warn should flag '$src'"; fail=1; }
+done
+printf 'let a = not x in y\n' > "$WORK/np.nim"
+grep -q 'not-in-precedence' <<<"$("$NP" check "$WORK/np.nim" 2>&1)" && {
+  echo "FAIL: not-in-precedence must be OFF by default"; fail=1; }
+# must NOT fire on the CORRECT forms
+for ok in 'let a = not (x in y)' 'let a = x notin y' 'let a = not p and q in r' \
+          'for i in items:\n  discard'; do
+  printf "$ok\n" > "$WORK/np.nim"
+  grep -q 'not-in-precedence' <<<"$("$NP" check --idioms:warn "$WORK/np.nim" 2>&1)" && {
+    echo "FAIL: correct form '$ok' must NOT be flagged"; fail=1; }
+done
+
 # (4f8) float-equality — OPT-IN, own flag (--float-equality:warn), also in pedantic.
 printf 'let z = x == 3.14\n' > "$WORK/fe.nim"
 grep -q 'float-equality' <<<"$("$NP" check "$WORK/fe.nim" 2>&1)" && {

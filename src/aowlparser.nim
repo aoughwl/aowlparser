@@ -179,6 +179,45 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
           message: "'not not' is a redundant double negation",
           line: n1.line, col: n1.col, endCol: toks[nn].endCol,
           fix: "remove both 'not's (the value is unchanged)")
+        continue
+      # `not x in y` — a precedence trap. Unary `not` binds tighter than the `in`
+      # operator, so this parses as `(not x) in y`, almost never what a Python
+      # migrant means (`x notin y`). We fire ONLY on the unambiguous shape
+      # `not <primary> in`, where <primary> is an identifier and its `.field`,
+      # `[i]`, `(args)` postfixes — never on `not (…)` (correctly grouped) nor when
+      # a binary operator (`and`, `==`, …) sits before the `in`. Zero corpus hits.
+      if nn < toks.len and toks[nn].kind == tkIdent:
+        var k = nn                              # last token of the primary so far
+        var walking = true
+        while walking:
+          var m = k + 1
+          while m < toks.len and toks[m].kind == tkComment: inc m
+          if m >= toks.len: break
+          let t = toks[m]
+          if t.kind == tkDot:                   # .field
+            var n = m + 1
+            while n < toks.len and toks[n].kind == tkComment: inc n
+            if n < toks.len and toks[n].kind == tkIdent: k = n
+            else: walking = false
+          elif t.kind == tkBracketLe or t.kind == tkParLe:   # [i] / (args)
+            var d = 1
+            var n = m + 1
+            while n < toks.len and d > 0:
+              let tk = toks[n].kind
+              if tk == tkBracketLe or tk == tkParLe or tk == tkCurlyLe: inc d
+              elif tk == tkBracketRi or tk == tkParRi or tk == tkCurlyRi: dec d
+              inc n
+            k = n - 1
+          else:
+            walking = false
+        var af = k + 1
+        while af < toks.len and toks[af].kind == tkComment: inc af
+        if af < toks.len and toks[af].kind == tkKeyword and toks[af].s == "in":
+          result.add Diagnostic(severity: sevHint, code: "not-in-precedence",
+            message: "'not " & toks[nn].s & " in …' means '(not " & toks[nn].s &
+                     ") in …' — you likely want 'notin'",
+            line: n1.line, col: n1.col, endCol: toks[af].endCol,
+            fix: "use 'x notin y' (or parenthesize: 'not (x in y)')")
   # `let`/`const` ALWAYS introduce a declaration, so the next significant token
   # must begin a name: an identifier, or `(` for a tuple unpack. Anything else —
   # a keyword (`let proc`), an operator, a literal, a closing bracket, EOF — is
