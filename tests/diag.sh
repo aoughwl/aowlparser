@@ -298,6 +298,19 @@ for ok in 'xs.map do (i: int):\n  echo i' 'proc f() =\n  do:\n    echo 1'; do
     echo "FAIL: valid '$(echo "$ok"|head -1)' must NOT flag a do-block habit"; fail=1; }
 done
 
+# (4f3k) c-block-comment — a C/Java/JS '/* … */' block comment. Nim uses '#[ … ]#'.
+# Must NOT flag '/*' inside a string or a '#' line comment, or real division 'a / b'.
+for bad in '/* comment */\nlet x = 5' 'let x = 5 /* c */' '/*multi\nline*/\nlet y = 1'; do
+  printf '%b\n' "$bad" > "$WORK/bc.nim"
+  grep -q 'c-block-comment' <<<"$("$NP" check "$WORK/bc.nim" 2>&1)" || {
+    echo "FAIL: '$(echo "$bad"|head -1)' should flag c-block-comment"; fail=1; }
+done
+for ok in 'let s = "/* not a comment */"' 'let c = "a/*b"' 'let x = a / b' 'let y = a div b'; do
+  printf '%b\n' "$ok" > "$WORK/bc.nim"
+  grep -q 'c-block-comment' <<<"$("$NP" check "$WORK/bc.nim" 2>&1)" && {
+    echo "FAIL: valid '$ok' must NOT flag c-block-comment"; fail=1; }
+done
+
 # (4f4) c-style-operator — OPT-IN only (--c-operators:warn). '&&'/'||' are Nim's
 # 'and'/'or'. Off by default (they are definable operators); on, they warn but
 # never touch a real 'and'/'or'.

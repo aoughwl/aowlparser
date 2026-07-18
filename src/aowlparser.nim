@@ -561,6 +561,21 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
             line: t.line, col: t.col, endCol: t.endCol,
             fix: "write the block as 'do (x): <body>'")
     inc doi
+  # `/* … */` — a C/C++/Java/JS block comment. Nim's block comment is `#[ … ]#`
+  # (and a line comment is `#`). `/*` glued lexes as a single operator token; a `/*`
+  # inside a string (the corpus generates C code with it) stays part of the string
+  # literal, never an operator, so this is zero-FP. It IS a syntactically valid
+  # operator NAME, but a real definition is backtick-quoted (`` `/*` ``) — an ident,
+  # not an operator token — so only a C-comment use is flagged.
+  var bci = 0
+  while bci < toks.len:
+    let t = toks[bci]
+    if t.kind == tkOperator and t.s == "/*":
+      result.add Diagnostic(severity: sevError, code: "c-block-comment",
+        message: "Nim block comments are '#[ … ]#', not the C-style '/* … */'",
+        line: t.line, col: t.col, endCol: t.endCol,
+        fix: "use '#[ … ]#' for a block comment (or '#' for a line comment)")
+    inc bci
   # `->` as a return-type arrow (`proc f() -> int`, a Rust/Python-3/C++ habit).
   # Nim writes the return type after a colon: `proc f(): int`. Found via the nifler
   # differential. Delicate: `->` is ALSO the std/sugar lambda-type operator
