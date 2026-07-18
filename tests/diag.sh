@@ -117,6 +117,18 @@ for ok in 'let x = a == b' 'const C = (1 == 1)' 'let ok = f(x == y)' 'let z = 1'
     echo "FAIL: '$ok' must NOT flag comparison-in-binding"; fail=1; }
 done
 
+# (4f3) else-if-not-elif — the C/Python 'else if' habit ('else' must be
+# followed by ':'; the chain keyword is 'elif'). Fires on adjacent 'else if',
+# silent on the valid 'else:' block that merely CONTAINS an 'if'.
+printf 'if a:\n  discard\nelse if b:\n  discard\n' > "$WORK/ei.nim"
+grep -q 'else-if-not-elif' <<<"$("$NP" check "$WORK/ei.nim" 2>&1)" || {
+  echo "FAIL: 'else if b:' should flag else-if-not-elif"; fail=1; }
+for ok in 'else:\n  if b:\n    discard' 'elif b:\n  discard' 'else:\n  discard'; do
+  printf 'if a:\n  discard\n%b\n' "$ok" > "$WORK/ei.nim"
+  grep -q 'else-if-not-elif' <<<"$("$NP" check "$WORK/ei.nim" 2>&1)" && {
+    echo "FAIL: valid else/elif must NOT flag else-if-not-elif ($ok)"; fail=1; }
+done
+
 # (4g) lexer-level numeric/identifier errors nifler catches (found by the
 # Nim/tests differential). Each must fire on the bad form and stay silent on the
 # valid one.

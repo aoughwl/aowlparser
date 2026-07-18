@@ -172,6 +172,23 @@ proc checkGrammar(toks: seq[Token]): seq[Diagnostic] =
           fix: "did you mean '='?")
         break
       inc j
+  # `else if` is not Nim — `else` must be followed by `:`, and the condition-chain
+  # keyword is `elif`. Two ADJACENT keyword tokens `else` then `if` on the same
+  # line are always this C/Python habit, never valid Nim: a real `else:` block that
+  # contains an `if` has the `:` (a token) between them, so they are not adjacent.
+  var ei = 0
+  while ei + 1 < toks.len:
+    let k = toks[ei]
+    if k.kind == tkKeyword and k.s == "else":
+      var j = ei + 1
+      while j < toks.len and toks[j].kind == tkComment: inc j
+      if j < toks.len and toks[j].kind == tkKeyword and toks[j].s == "if" and
+         toks[j].line == k.line:
+        result.add Diagnostic(severity: sevError, code: "else-if-not-elif",
+          message: "'else if' is not Nim — use 'elif'",
+          line: k.line, col: k.col, endCol: toks[j].endCol,
+          fix: "replace 'else if' with 'elif'")
+    inc ei
   # An EMPTY comma-separated slot — a doubled `,,` or a leading `(,`/`[,` — has
   # no expression where one is required, so nifler reports "expression expected,
   # but found ','". A TRAILING comma (`foo(a,)`, `[1,2,]`, `(1,)`) is valid Nim
