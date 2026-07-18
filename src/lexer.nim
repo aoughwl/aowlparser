@@ -73,12 +73,14 @@ type
     tabStops*: TabStops     ## tab-advance mode when tabs permitted (default tsHard).
     docComments*: bool      ## true (default) = emit standalone doc comments as a
                             ## `(comment)` node; false = drop them entirely.
+    cOperatorsWarn*: bool   ## advisory: warn on the C boolean operators `&&`/`||`
+                            ## (Nim uses `and`/`or`); opt-in (default off).
 
 const
   defaultLexOptions* = LexOptions(tabPolicy: tpSpaces, tabWidth: 8, indentWidth: 0,
     finalNewlineRequire: false, newlinePolicy: nlAny, trailingWhitespaceWarn: false,
     bomPolicy: bomDefault, indentConsistency: false, tabStops: tsHard,
-    docComments: true)
+    docComments: true, cOperatorsWarn: false)
 
 type
   Lexer = object

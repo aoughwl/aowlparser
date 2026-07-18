@@ -76,12 +76,25 @@ proc checkBrackets(toks: seq[Token]): seq[Diagnostic] =
       line: t.line, col: t.col, endCol: t.col + 1,
       fix: "add a matching '" & closerFor(t.kind) & "'")
 
-proc checkGrammar(toks: seq[Token]): seq[Diagnostic] =
+proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
   ## Grammar-level errors the range-splitter silently copes with but nifler
   ## rejects. Purely a validator — never changes the emitted AIF. Conservative:
   ## every case here is UNAMBIGUOUSLY malformed (zero false positives on valid
   ## Nim), so `check` can flag it the way a real front end would.
   result = @[]
+  # OPT-IN advisory: the C boolean operators `&&`/`||` (Nim uses `and`/`or`).
+  # These ARE definable operators, so this fires ONLY under --c-operators:warn,
+  # and it carries a suggestion, never an auto-fix — `and`/`or` bind at a
+  # different precedence, so the rewrite needs a human's eye.
+  if opts.cOperatorsWarn:
+    for ci in 0 ..< toks.len:
+      let t = toks[ci]
+      if t.kind == tkOperator and (t.s == "&&" or t.s == "||"):
+        let word = if t.s == "&&": "and" else: "or"
+        result.add Diagnostic(severity: sevWarn, code: "c-style-operator",
+          message: "'" & t.s & "' is not a Nim boolean operator — use '" & word & "'",
+          line: t.line, col: t.col, endCol: t.endCol,
+          fix: "use '" & word & "' (mind operator precedence)")
   # `let`/`const` ALWAYS introduce a declaration, so the next significant token
   # must begin a name: an identifier, or `(` for a tuple unpack. Anything else —
   # a keyword (`let proc`), an operator, a literal, a closing bracket, EOF — is
@@ -320,7 +333,7 @@ proc collectDiags(src: string; opts: LexOptions): (seq[Token], seq[Diagnostic]) 
   let toks = tokenize(src, opts, errors)
   var diags = gLexDiags
   for d in checkBrackets(toks): diags.add d
-  for d in checkGrammar(toks): diags.add d
+  for d in checkGrammar(toks, opts): diags.add d
   sortBySourceOrder(diags)   # source-order for top-to-bottom reading
   result = (toks, diags)
 
@@ -430,6 +443,8 @@ proc usage() =
   write stderr, "                       crlf    warn on any non-CRLF line ending\n"
   write stderr, "  --trailing-whitespace:warn  warn on any line with spaces/tabs before its\n"
   write stderr, "                       newline (default off; advisory only)\n"
+  write stderr, "  --c-operators:warn   warn on the C boolean operators && / || (use and/or;\n"
+  write stderr, "                       default off; advisory only)\n"
   write stderr, "  --bom:MODE         leading UTF-8 BOM handling (default: legacy skip):\n"
   write stderr, "                       strip   consume a BOM without shifting line-1 columns\n"
   write stderr, "                       reject  warn/error on a leading BOM\n"
@@ -547,6 +562,12 @@ proc main() =
       of "warn": opts.trailingWhitespaceWarn = true
       else:
         write stderr, "unknown --trailing-whitespace mode: " & afterColon(a) & "\n"
+        usage()
+    elif hasPrefix(a, "--c-operators:"):
+      case afterColon(a)
+      of "warn": opts.cOperatorsWarn = true
+      else:
+        write stderr, "unknown --c-operators mode: " & afterColon(a) & "\n"
         usage()
     elif hasPrefix(a, "--bom:"):
       case afterColon(a)

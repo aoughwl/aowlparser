@@ -132,6 +132,18 @@ for ok in 'else:\n  if b:\n    discard' 'elif b:\n  discard' 'else:\n  discard';
     echo "FAIL: valid else/elif must NOT flag else-if-not-elif ($ok)"; fail=1; }
 done
 
+# (4f4) c-style-operator — OPT-IN only (--c-operators:warn). '&&'/'||' are Nim's
+# 'and'/'or'. Off by default (they are definable operators); on, they warn but
+# never touch a real 'and'/'or'.
+printf 'if a && b or c:\n  discard\n' > "$WORK/co.nim"
+grep -q 'c-style-operator' <<<"$("$NP" check "$WORK/co.nim" 2>&1)" && {
+  echo "FAIL: && must NOT be flagged by DEFAULT"; fail=1; }
+grep -q 'c-style-operator' <<<"$("$NP" check --c-operators:warn "$WORK/co.nim" 2>&1)" || {
+  echo "FAIL: --c-operators:warn should flag &&"; fail=1; }
+printf 'if a and b or c:\n  discard\n' > "$WORK/co.nim"
+grep -q 'c-style-operator' <<<"$("$NP" check --c-operators:warn "$WORK/co.nim" 2>&1)" && {
+  echo "FAIL: valid and/or must NOT flag c-style-operator"; fail=1; }
+
 # (4g) lexer-level numeric/identifier errors nifler catches (found by the
 # Nim/tests differential). Each must fire on the bad form and stay silent on the
 # valid one.
