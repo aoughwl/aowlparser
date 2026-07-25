@@ -83,7 +83,7 @@ proc checkBrackets*(toks: seq[Token]): seq[Diagnostic] =
       line: t.line, col: t.col, endCol: t.col + 1,
       fix: "add a matching '" & closerFor(t.kind) & "'")
 
-proc checkGrammar*(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
+proc checkGrammar*(toks: seq[Token]; opts: LexOptions; curly: bool = false): seq[Diagnostic] =
   ## Grammar-level errors the range-splitter silently copes with but nifler
   ## rejects. Purely a validator  -  never changes the emitted AIF. Conservative:
   ## every case here is UNAMBIGUOUSLY malformed (zero false positives on valid
@@ -820,7 +820,9 @@ proc checkGrammar*(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
         if t2.kind == tkCurlyLe:
           if depth == 0:
             let nextIsDot = j + 1 < toks.len and toks[j + 1].kind == tkDot
-            if (not nextIsDot) and sawParams:
+            # curly-block mode: `{ … }` is a valid body, so suppress this
+            # cross-language brace-habit lint (only flag it for classic indent mode).
+            if (not nextIsDot) and sawParams and not curly:
               result.add Diagnostic(severity: sevError, code: "c-brace-body",
                 message: "'{' is not a Nim block  -  use an indented body after '='",
                 line: t2.line, col: t2.col, endCol: t2.endCol,

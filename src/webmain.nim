@@ -94,7 +94,7 @@ proc parseToStr(src, fileField: string; curly: bool; opts: LexOptions;
   var diags = gLexDiags
   # structural + grammar validators over the token stream
   for d in checkBrackets(toks): diags.add d
-  for d in checkGrammar(toks, opts): diags.add d
+  for d in checkGrammar(toks, opts, curly): diags.add d
   # parse (in-memory builder); the parser records grammar errors at each coping
   # point into ps.diags as it goes.
   var ps = initParser(toks, fileField, curly)
