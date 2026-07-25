@@ -76,7 +76,7 @@ proc checkBrackets(toks: seq[Token]): seq[Diagnostic] =
       line: t.line, col: t.col, endCol: t.col + 1,
       fix: "add a matching '" & closerFor(t.kind) & "'")
 
-proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
+proc checkGrammar(toks: seq[Token]; opts: LexOptions; curly: bool = false): seq[Diagnostic] =
   ## Grammar-level errors the range-splitter silently copes with but nifler
   ## rejects. Purely a validator — never changes the emitted AIF. Conservative:
   ## every case here is UNAMBIGUOUSLY malformed (zero false positives on valid
@@ -813,7 +813,9 @@ proc checkGrammar(toks: seq[Token]; opts: LexOptions): seq[Diagnostic] =
         if t2.kind == tkCurlyLe:
           if depth == 0:
             let nextIsDot = j + 1 < toks.len and toks[j + 1].kind == tkDot
-            if (not nextIsDot) and sawParams:
+            # In curly-block mode `{ … }` IS a valid body, so this cross-language
+            # brace-habit lint must NOT fire — only flag it for classic indent mode.
+            if (not nextIsDot) and sawParams and not curly:
               result.add Diagnostic(severity: sevError, code: "c-brace-body",
                 message: "'{' is not a Nim block — use an indented body after '='",
                 line: t2.line, col: t2.col, endCol: t2.endCol,
@@ -1280,7 +1282,7 @@ proc renderDiags(diags: seq[Diagnostic]; fileField: string; fmt: DiagFormat;
     s.add "]\n"
     write dest, s
 
-proc collectDiags(src: string; opts: LexOptions): (seq[Token], seq[Diagnostic]) =
+proc collectDiags(src: string; opts: LexOptions; curly: bool = false): (seq[Token], seq[Diagnostic]) =
   ## Tokenise and gather ALL diagnostics — the lexer's (unknown bytes, unclosed
   ## strings, style/portability warnings) plus the structural bracket check.
   ## Recoverable: tokens are returned regardless so the caller can still emit AIF.
@@ -1288,7 +1290,7 @@ proc collectDiags(src: string; opts: LexOptions): (seq[Token], seq[Diagnostic]) 
   let toks = tokenize(src, opts, errors)
   var diags = gLexDiags
   for d in checkBrackets(toks): diags.add d
-  for d in checkGrammar(toks, opts): diags.add d
+  for d in checkGrammar(toks, opts, curly): diags.add d
   sortBySourceOrder(diags)   # source-order for top-to-bottom reading
   result = (toks, diags)
 
@@ -1297,7 +1299,7 @@ proc runParse(src, outp, fileField: string; toStdout, strict, curly: bool;
   ## Tokenize `src`, parse it, and emit the AIF to `outp` (or stdout). Diagnostics
   ## (lexer + bracket check) are rendered to stderr in `diagFmt`; parsing is never
   ## aborted by them. With `strict`, any `sevError` diagnostic exits non-zero.
-  let (toks, diags0) = collectDiags(src, opts)
+  let (toks, diags0) = collectDiags(src, opts, curly)
   var ps = initParser(toks, fileField, curly, maxDepth)
   var diags = diags0
   if toStdout:
@@ -1353,7 +1355,7 @@ proc runCheck(src, fileField: string; opts: LexOptions; diagFmt: DiagFormat;
     # Not plain Nim — needs a source-code filter we don't apply. Stay silent
     # (exit 0) rather than report spurious lexical errors on the raw template.
     return 0
-  let (toks, diags0) = collectDiags(src, opts)
+  let (toks, diags0) = collectDiags(src, opts, curly)
   var diags = diags0
   # GRAMMAR errors are discovered by parsing (each of the parser's coping points
   # is an "expected X here" site), so `check` runs a full parse and throws the
