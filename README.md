@@ -87,6 +87,33 @@ aowlparser p --diagnostics:json in.nim out.p.aif   # structured diagnostics for 
 
 Everything is off by default, so a plain run is byte-compatible with `nifler`.
 
+## Linking aowlparser as a library
+
+Import the aggregator modules — `parser`, `cssparser`, `htmlparser`, `pyparser`,
+`jsparser`, `jsonparser`, `completeness`. The grammar files (`parsecore.nim`,
+`parse_expr.nim`, `css_lex.nim`, …) are `include` files spliced into their
+aggregator: **`import parsecore` fails hard.**
+
+### `completeness` — "is this finished, or still being typed?"
+
+```nim
+import completeness
+completeness("x + 1").verdict       # ckComplete
+completeness("if x > 1:").verdict   # ckIncomplete  (dangling-token)
+completeness("foo(").verdict        # ckIncomplete  (unclosed-bracket)
+completeness("foo)").verdict        # ckInvalid     (unmatched-close)
+```
+
+```sh
+aowlparser complete in.nim    # exit 0 complete / 2 incomplete / 1 invalid
+```
+
+This is the one question `check` deliberately cannot answer: `type`,
+`if x > 1:` and `proc twice(x: int): int =` produce **no diagnostics**, because
+reading them as empty-bodied constructs is required for `nifler` compatibility.
+Correct for `check`, useless for a REPL. The distinction that matters is
+`ckIncomplete` (can be finished by typing more) versus `ckInvalid` (cannot).
+
 ## aowlparse — the generic parsing core
 
 `src/aowlparse/` is a small library for building byte-exact source→AIF front

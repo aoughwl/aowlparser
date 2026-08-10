@@ -5,6 +5,8 @@
 ## CLI (mirrors nifler):
 ##   aowlparser p <in.nim> [out.p.aif]     parse a Nim file, produce a AIF file
 ##   aowlparser css|html|py|js|json <in> [out]  parse a dialect to AIF
+##   aowlparser complete <in.nim>          finished, or still being typed?
+##                                         exit 0 complete / 2 incomplete / 1 invalid
 ##   aowlparser render <in.aif> [out]      AIF back to source (inverse of the above)
 ##
 ## When the output path is omitted it defaults to `<in>.p.aif` (`<in>.css.aif` for
@@ -18,6 +20,7 @@ import std/[syncio, os]
 import nifbuilder
 import tokens, lexer, parser
 import aifread, cssparser, htmlparser, pyparser, jsparser, jsonparser
+import completeness
 
 type
   DiagFormat = enum dfText, dfJson, dfOff
@@ -1678,7 +1681,8 @@ proc main() =
   let action = params[0]
   if action != "p" and action != "parse" and action != "check" and
      action != "css" and action != "html" and action != "py" and
-     action != "js" and action != "json" and action != "render":
+     action != "js" and action != "json" and action != "render" and
+     action != "complete":
     write stderr, "unknown command: " & action & "\n"
     usage()
   # Positional args after the action: [input] [output]. `-` at either slot means
@@ -1720,6 +1724,22 @@ proc main() =
       fileField = relativePath(absolutePath(inputArg), getCurrentDir(), '/')
     except:
       discard   # unresolvable path → keep the arg verbatim
+  # `complete` answers "could this be continued?" for a REPL or an editor —
+  # the one question `check` deliberately cannot answer, because an empty-bodied
+  # `if x > 1:` is valid to nifler and unfinished to a human.
+  if action == "complete":
+    let r = completeness(src)
+    case r.verdict
+    of ckComplete:
+      write stdout, "complete\n"
+      quit 0
+    of ckIncomplete:
+      write stdout, "incomplete " & r.reason & "\n"
+      quit 2
+    of ckInvalid:
+      write stdout, "invalid " & r.reason & "\n"
+      quit 1
+
   # `check` is lint-only: diagnostics to stdout, no AIF, exit 1 on any error.
   if action == "check":
     quit runCheck(src, fileField, opts, diagFmt, curly, maxDepth)
