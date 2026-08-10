@@ -4,7 +4,7 @@
 ##
 ## CLI (mirrors nifler):
 ##   aowlparser p <in.nim> [out.p.aif]     parse a Nim file, produce a AIF file
-##   aowlparser css|html|py|js <in> [out]  parse a document/source dialect to AIF
+##   aowlparser css|html|py|js|json <in> [out]  parse a dialect to AIF
 ##   aowlparser render <in.aif> [out]      AIF back to source (inverse of the above)
 ##
 ## When the output path is omitted it defaults to `<in>.p.aif` (`<in>.css.aif` for
@@ -17,7 +17,7 @@
 import std/[syncio, os]
 import nifbuilder
 import tokens, lexer, parser
-import aifread, cssparser, htmlparser, pyparser, jsparser
+import aifread, cssparser, htmlparser, pyparser, jsparser, jsonparser
 
 type
   DiagFormat = enum dfText, dfJson, dfOff
@@ -1678,7 +1678,7 @@ proc main() =
   let action = params[0]
   if action != "p" and action != "parse" and action != "check" and
      action != "css" and action != "html" and action != "py" and
-     action != "js" and action != "render":
+     action != "js" and action != "json" and action != "render":
     write stderr, "unknown command: " & action & "\n"
     usage()
   # Positional args after the action: [input] [output]. `-` at either slot means
@@ -1740,6 +1740,8 @@ proc main() =
       text = renderPy(src)
     elif dialect == "js-parsed":
       text = renderJs(src)
+    elif dialect == "json-parsed":
+      text = renderJson(src)
     else:
       write stderr, "cannot render dialect: " &
         (if dialect.len > 0: dialect else: "<none>") & "\n"
@@ -1754,13 +1756,15 @@ proc main() =
         quit 1
     quit 0
 
-  if action == "css" or action == "html" or action == "py" or action == "js":
+  if action == "css" or action == "html" or action == "py" or
+     action == "js" or action == "json":
     var docDiags: seq[Diagnostic] = @[]
     var aif = ""
     case action
     of "css": aif = cssToAif(src, docDiags)
     of "html": aif = htmlToAif(src, docDiags)
     of "py": aif = pyToAif(src, docDiags)
+    of "json": aif = jsonToAif(src, docDiags)
     else: aif = jsToAif(src, docDiags)
     if diagFmt != dfOff and docDiags.len > 0:
       renderDiags(docDiags, fileField, diagFmt, stderr)

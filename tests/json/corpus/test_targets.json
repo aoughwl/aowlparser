@@ -1,0 +1,53 @@
+{
+  "cacheVersion": "D20240927T193831",
+  "outputFile": "/home/savant/aoughwl/requests/bin/test_targets",
+  "outputLastModificationTime": "",
+  "compile": [
+    [
+      "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@ssystem.nim.c",
+      "gcc -c  -w -fmax-errors=3 -pthread   -I/home/savant/Nim/lib -I/home/savant/aoughwl/requests/tests -o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@ssystem.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@ssystem.nim.c"
+    ],
+    [
+      "/home/savant/.cache/nim/test_targets_d/@m..@ssrc@srequests@sclient.nim.c",
+      "gcc -c  -w -fmax-errors=3 -pthread   -I/home/savant/Nim/lib -I/home/savant/aoughwl/requests/tests -o /home/savant/.cache/nim/test_targets_d/@m..@ssrc@srequests@sclient.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@ssrc@srequests@sclient.nim.c"
+    ],
+    [
+      "/home/savant/.cache/nim/test_targets_d/@mtest_targets.nim.c",
+      "gcc -c  -w -fmax-errors=3 -pthread   -I/home/savant/Nim/lib -I/home/savant/aoughwl/requests/tests -o /home/savant/.cache/nim/test_targets_d/@mtest_targets.nim.c.o /home/savant/.cache/nim/test_targets_d/@mtest_targets.nim.c"
+    ]
+  ],
+  "link": [
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@ssystem@sexceptions.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@sstd@sprivate@sdigitsutils.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@sstd@sassertions.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@ssystem@sdollars.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@ssystem.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@spure@smath.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@spure@salgorithm.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@spure@sstrutils.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@sstd@sprivate@sospaths2.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@spure@soptions.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@spure@stimes.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@sstd@senvvars.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@sstd@scmdline.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@ssrc@srequests@sffi.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@ssrc@srequests@sprofiles.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@m..@ssrc@srequests@sclient.nim.c.o",
+    "/home/savant/.cache/nim/test_targets_d/@mtest_targets.nim.c.o"
+  ],
+  "linkcmd": "gcc   -o /home/savant/aoughwl/requests/bin/test_targets /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@ssystem@sexceptions.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@sstd@sprivate@sdigitsutils.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@sstd@sassertions.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@ssystem@sdollars.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@ssystem.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@spure@smath.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@spure@salgorithm.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@spure@sstrutils.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@sstd@sprivate@sospaths2.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@spure@soptions.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@spure@stimes.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@sstd@senvvars.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@s..@s..@sNim@slib@sstd@scmdline.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@ssrc@srequests@sffi.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@ssrc@srequests@sprofiles.nim.c.o /home/savant/.cache/nim/test_targets_d/@m..@ssrc@srequests@sclient.nim.c.o /home/savant/.cache/nim/test_targets_d/@mtest_targets.nim.c.o  -pthread -pthread -lm -lm -lrt -Wl,-rpath,/home/savant/aoughwl/requests/vendor/curl-impersonate/lib   -ldl",
+  "extraCmds": [],
+  "configFiles": [
+    "/home/savant/Nim/config/nim.cfg",
+    "/home/savant/Nim/config/config.nims",
+    "/home/savant/.config/nim/nim.cfg",
+    "/home/savant/aoughwl/nim.cfg"
+  ],
+  "stdinInput": false,
+  "projectIsCmd": false,
+  "cmdInput": "",
+  "currentDir": "/home/savant/aoughwl/requests",
+  "cmdline": "",
+  "depfiles": [],
+  "nimexe": ""
+}

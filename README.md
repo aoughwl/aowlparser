@@ -122,6 +122,24 @@ node is a silent byte loss, and the gate names it instead.
 Adding a dialect means writing a tokenizer, a fused parse+emit, and a
 declaration. Rendering, gating, and fuzzing come for free.
 
+### The dialects
+
+Each is a first-class parser, not a demo. All are byte-exact on real corpora:
+
+| dialect | command | validated on |
+|---|---|---|
+| `nim-parsed` | `aowlparser p` | 172/172 corpus + full Nim stdlib, vs the `nifler` oracle |
+| `css-parsed` | `aowlparser css` | bootstrap ×2 + doxygen suite, 543KB |
+| `html-parsed` | `aowlparser html` | 150 diverse real pages |
+| `py-parsed` | `aowlparser py` | **all 2,885 `.py` on this machine**, 8s |
+| `js-parsed` | `aowlparser js` | **11,556 `.js`, 557MB**, 100s |
+| `json-parsed` | `aowlparser json` | **4,326 `.json`**, 8s |
+
+`src/jsonparser.nim` is the economy check: declaration, tokenizer, parser,
+renderer and all, in **one short file**, because everything except the JSON
+grammar already existed. A new format should cost only what is genuinely new
+about it.
+
 ## Document dialects: CSS
 
 Beyond Nim, aowlparser ingests document formats into AIF. The first is CSS, as the

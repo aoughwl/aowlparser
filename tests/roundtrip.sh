@@ -114,6 +114,12 @@ for f in "$HERE"/js/corpus/*.js; do
   check_one "$f" "$(basename "$f")" js
 done
 
+echo "json-parsed:"
+for f in "$HERE"/json/corpus/*.json; do
+  [ -e "$f" ] || continue
+  check_one "$f" "$(basename "$f")" json
+done
+
 echo "--------------------------------------------------------------"
 echo "round-trip: $total files   PASS: $pass   FAIL: $fail   ($bytes bytes byte-exact)"
 if [ -n "$fails" ]; then
