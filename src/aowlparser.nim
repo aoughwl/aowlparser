@@ -5,6 +5,8 @@
 ## CLI (mirrors nifler):
 ##   aowlparser p <in.nim> [out.p.aif]     parse a Nim file, produce a AIF file
 ##   aowlparser css|html|py|js|json|vds <in> [out]  parse a dialect to AIF
+##   aowlparser auto <in> [out]            pick the dialect by file extension
+##   aowlparser dialects                   list every dialect and its node counts
 ##   aowlparser complete <in.nim>          finished, or still being typed?
 ##                                         exit 0 complete / 2 incomplete / 1 invalid
 ##   aowlparser render <in.aif> [out]      AIF back to source (inverse of the above)
@@ -21,6 +23,8 @@ import nifbuilder
 import tokens, lexer, parser
 import aifread, cssparser, htmlparser, pyparser, jsparser, jsonparser, vdsparser
 import completeness
+import dialects
+import aowlparse/nodespec
 
 type
   DiagFormat = enum dfText, dfJson, dfOff
@@ -1682,9 +1686,47 @@ proc main() =
   if action != "p" and action != "parse" and action != "check" and
      action != "css" and action != "html" and action != "py" and
      action != "js" and action != "json" and action != "vds" and
-     action != "render" and action != "complete":
+     action != "render" and action != "complete" and action != "auto" and
+     action != "dialects":
     write stderr, "unknown command: " & action & "\n"
     usage()
+  # `dialects` is self-describing: it prints the registry, including each
+  # dialect's node vocabulary, so the tag set never has to be documented twice.
+  if action == "dialects":
+    let all = allDialects()
+    for i in 0 ..< all.len:
+      let d = all[i]
+      var exts = ""
+      # Index, do not iterate a seq FIELD of a copied object: nimony's C emitter
+      # reuses one mangled name for both a local temp and a field selector,
+      # emitting `X60Qii_5.X60Qii_6` where it meant `.exts` —
+      #   error: 'DialectEntry_0_...' has no member named 'X60Qii_6'
+      let dexts = d.exts
+      for ei in 0 ..< dexts.len:
+        if exts.len > 0: exts.add " "
+        exts.add dexts[ei]
+      write stdout, d.command & "  (" & d.name & ")  " & exts & "\n"
+      write stdout, "    " & d.summary & "\n"
+      var texts = 0
+      var puncts = 0
+      var structs = 0
+      # Bind the node table to a local and index it. Iterating the nested field
+      # directly (`for n in d.spec.nodes`) makes nimony emit C referencing a
+      # struct member that does not exist:
+      #   error: 'DialectEntry_0_...' has no member named 'X60Qii_6'
+      # A codegen defect, not a type error — it compiles clean and fails at cc.
+      let spec = specOf(d.command)
+      let nodes = spec.nodes
+      for ni in 0 ..< nodes.len:
+        case nodes[ni].kind
+        of nkText: texts = texts + 1
+        of nkPunct: puncts = puncts + 1
+        of nkStruct: structs = structs + 1
+        of nkOpaque: discard
+      write stdout, "    " & $nodes.len & " nodes: " & $structs &
+        " structural, " & $texts & " text, " & $puncts & " punctuation\n"
+    quit 0
+
   # Positional args after the action: [input] [output]. `-` at either slot means
   # stdin/stdout, mirroring the `--stdin`/`--stdout` flags.
   var inputArg = ""
@@ -1724,6 +1766,20 @@ proc main() =
       fileField = relativePath(absolutePath(inputArg), getCurrentDir(), '/')
     except:
       discard   # unresolvable path → keep the arg verbatim
+  # `auto` picks the dialect from the file extension, so a caller with a mixed
+  # bag of files does not have to switch on it. An unknown extension is a NAMED
+  # error listing what is known — never a silent fallthrough to some default.
+  var effAction = action
+  if action == "auto":
+    let idx = byExtension(inputArg)
+    if idx < 0:
+      write stderr, "no dialect for " &
+        (if inputArg.len > 0: inputArg else: "<stdin>") &
+        "  (known extensions: " & knownExtensions() & ")\n"
+      quit 1
+    let all = allDialects()
+    effAction = all[idx].command
+
   # `complete` answers "could this be continued?" for a REPL or an editor —
   # the one question `check` deliberately cannot answer, because an empty-bodied
   # `if x > 1:` is valid to nifler and unfinished to a human.
@@ -1778,11 +1834,11 @@ proc main() =
         quit 1
     quit 0
 
-  if action == "css" or action == "html" or action == "py" or
-     action == "js" or action == "json" or action == "vds":
+  if effAction == "css" or effAction == "html" or effAction == "py" or
+     effAction == "js" or effAction == "json" or effAction == "vds":
     var docDiags: seq[Diagnostic] = @[]
     var aif = ""
-    case action
+    case effAction
     of "css": aif = cssToAif(src, docDiags)
     of "html": aif = htmlToAif(src, docDiags)
     of "py": aif = pyToAif(src, docDiags)
@@ -1796,7 +1852,7 @@ proc main() =
       if outputArg != "" and outputArg != "-":
         target = outputArg
       else:
-        target = inputArg & "." & action & ".aif"
+        target = inputArg & "." & effAction & ".aif"
     if target == "":
       write stdout, aif
     else:
