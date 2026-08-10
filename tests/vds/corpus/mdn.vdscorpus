@@ -1,0 +1,2508 @@
+21
+@charset "<charset>";
+369
+@counter-style <counter-style-name> {
+  [ system: <counter-system>; ] ||
+  [ symbols: <counter-symbols>; ] ||
+  [ additive-symbols: <additive-symbols>; ] ||
+  [ negative: <negative-symbol>; ] ||
+  [ prefix: <prefix>; ] ||
+  [ suffix: <suffix>; ] ||
+  [ range: <range>; ] ||
+  [ pad: <padding>; ] ||
+  [ speak-as: <speak-as>; ] ||
+  [ fallback: <counter-style-name>; ]
+}
+26
+[ <integer> && <symbol> ]#
+20
+<counter-style-name>
+18
+<symbol> <symbol>?
+21
+<integer> && <symbol>
+8
+<symbol>
+39
+[ [ <integer> | infinite ]{2} ]# | auto
+67
+auto | bullets | numbers | words | spell-out | <counter-style-name>
+8
+<symbol>
+9
+<symbol>+
+109
+cyclic | numeric | alphabetic | symbolic | additive | [ fixed <integer>? ] | [ extends <counter-style-name> ]
+132
+@document [ <url> | url-prefix(<string>) | domain(<string>) | media-document(<string>) | regexp(<string>) ]# {
+  <group-rule-body>
+}
+556
+@font-face {
+  [ font-family: <family-name>; ] ||
+  [ src: <src>; ] ||
+  [ unicode-range: <unicode-range>; ] ||
+  [ font-variant: <font-variant>; ] ||
+  [ font-feature-settings: <font-feature-settings>; ] ||
+  [ font-variation-settings: <font-variation-settings>; ] ||
+  [ font-stretch: <font-stretch>; ] ||
+  [ font-weight: <font-weight>; ] ||
+  [ font-style: <font-style>; ] ||
+  [ size-adjust: <size-adjust>; ] ||
+  [ ascent-override: <ascent-override>; ] ||
+  [ descent-override: <descent-override>; ] ||
+  [ line-gap-override: <line-gap-override>; ]
+}
+21
+normal | <percentage>
+21
+normal | <percentage>
+45
+[ auto | block | swap | fallback | optional ]
+13
+<family-name>
+29
+normal | <feature-tag-value>#
+28
+<font-stretch-absolute>{1,2}
+38
+normal | italic | oblique <angle>{0,2}
+31
+normal | [ <string> <number> ]#
+27
+<font-weight-absolute>{1,2}
+21
+normal | <percentage>
+12
+<percentage>
+60
+[ <url> [ format( <string># ) ]? | local( <family-name> ) ]#
+22
+<unicode-range-token>#
+68
+@font-feature-values <family-name># {
+  <feature-value-block-list>
+}
+60
+@font-palette-values <dashed-ident> {
+  <declaration-list>
+}
+32
+light | dark | <integer [0,∞]>
+14
+<family-name>#
+30
+[ <integer [0,∞]> <color> ]#
+165
+@import [ <string> | <url> ]
+        [ layer | layer(<layer-name>) ]?
+        [ supports( [ <supports-condition> | <declaration> ] ) ]?
+        <media-query-list>? ;
+55
+@keyframes <keyframes-name> {
+  <keyframe-block-list>
+}
+60
+@layer [ <layer-name># | <layer-name>?  {
+  <stylesheet>
+} ]
+49
+@media <media-query-list> {
+  <group-rule-body>
+}
+52
+@namespace <namespace-prefix>? [ <string> | <url> ];
+44
+@page <page-selector-list> {
+  <page-body>
+}
+15
+auto | <length>
+24
+none | [ crop || cross ]
+37
+upright | rotate-left | rotate-right 
+66
+<length>{1,2} | auto | [ <page-size> || [ portrait | landscape ] ]
+53
+@position-try <dashed-ident> {
+  <declaration-list>
+}
+57
+@property <custom-property-name> {
+  <declaration-list>
+}
+12
+true | false
+20
+<declaration-value>?
+8
+<string>
+63
+@scope [(<scope-start>)]? [to (<scope-end>)]? {
+  <rule-list>
+}
+60
+@starting-style {
+  <declaration-list> | <group-rule-body>
+}
+54
+@supports <supports-condition> {
+  <group-rule-body>
+}
+41
+@view-transition {
+  <declaration-list>
+}
+11
+auto | none
+22
+none | <custom-ident>+
+17
+abs( <calc-sum> )
+18
+acos( <calc-sum> )
+63
+anchor( <anchor-name>? && <anchor-side>, <length-percentage>? )
+73
+anchor-size( [ <anchor-name> || <anchor-size> ]? , <length-percentage>? )
+18
+asin( <calc-sum> )
+18
+atan( <calc-sum> )
+31
+atan2( <calc-sum>, <calc-sum> )
+57
+attr( <attr-name> <type-or-unit>? [, <attr-fallback> ]? )
+17
+blur( <length>? )
+42
+brightness( [ <number> | <percentage> ]? )
+18
+calc( <calc-sum> )
+42
+calc-size( <calc-size-basis>, <calc-sum> )
+48
+circle( [ <shape-radius> ]? [ at <position> ]? )
+23
+clamp( <calc-sum>#{3} )
+78
+color( [ from <color> ]? <colorspace-params> [ / [ <alpha-value> | none ] ]? )
+83
+color-mix( <color-interpolation-method> , [ <color> && <percentage [0,100]>? ]#{2})
+81
+conic-gradient( [ from <angle> ]? [ at <position> ]?, <angular-color-stop-list> )
+40
+contrast( [ <number> | <percentage> ]? )
+17
+cos( <calc-sum> )
+43
+counter( <counter-name>, <counter-style>? )
+54
+counters( <counter-name>, <string>, <counter-style>? )
+51
+cross-fade( <cf-mixing-image> , <cf-final-image>? )
+44
+drop-shadow( [ <color>? && <length>{2,3} ] )
+24
+element( <id-selector> )
+52
+ellipse( [ <shape-radius>{2} ]? [ at <position> ]? )
+44
+env( <custom-ident> , <declaration-value>? )
+17
+exp( <calc-sum> )
+42
+fit-content( <length-percentage [0,∞]> )
+41
+grayscale( [ <number> | <percentage> ]? )
+118
+hsl( <hue> <percentage> <percentage> [ / <alpha-value> ]? ) | hsl( <hue>, <percentage>, <percentage>, <alpha-value>? )
+120
+hsla( <hue> <percentage> <percentage> [ / <alpha-value> ]? ) | hsla( <hue>, <percentage>, <percentage>, <alpha-value>? )
+35
+hue-rotate( [ <angle> | <zero> ]? )
+95
+hwb( [<hue> | none] [<percentage> | none] [<percentage> | none] [ / [<alpha-value> | none] ]? )
+20
+hypot( <calc-sum># )
+51
+image( <image-tags>? [ <image-src>? , <color>? ]! )
+32
+image-set( <image-set-option># )
+62
+inset( <length-percentage>{1,4} [ round <'border-radius'> ]? )
+38
+invert( [ <number> | <percentage> ]? )
+137
+lab( [<percentage> | <number> | none] [ <percentage> | <number> | none] [ <percentage> | <number> | none] [ / [<alpha-value> | none] ]? )
+21
+layer( <layer-name> )
+119
+lch( [<percentage> | <number> | none] [ <percentage> | <number> | none] [ <hue> | none] [ / [<alpha-value> | none] ]? )
+23
+leader( <leader-type> )
+30
+light-dark( <color>, <color> )
+73
+linear-gradient( [ <angle> | to <side-or-corner> ]? , <color-stop-list> )
+30
+log( <calc-sum>, <calc-sum>? )
+22
+matrix( <number>#{6} )
+25
+matrix3d( <number>#{16} )
+18
+max( <calc-sum># )
+18
+min( <calc-sum># )
+138
+minmax( [ <length-percentage> | min-content | max-content | auto ] , [ <length-percentage> | <flex> | min-content | max-content | auto ] )
+29
+mod( <calc-sum>, <calc-sum> )
+140
+oklab( [ <percentage> | <number> | none] [ <percentage> | <number> | none] [ <percentage> | <number> | none] [ / [<alpha-value> | none] ]? )
+122
+oklch( [ <percentage> | <number> | none] [ <percentage> | <number> | none] [ <hue> | none] [ / [<alpha-value> | none] ]? )
+39
+opacity( [ <number> | <percentage> ]? )
+38
+paint( <ident>, <declaration-value>? )
+142
+palette-mix(<color-interpolation-method> , [ [normal | light | dark | <palette-identifier> | <palette-mix()> ] && <percentage [0,100]>? ]#{2})
+33
+path( <'fill-rule'>? , <string> )
+42
+perspective( [ <length [0,∞]> | none ] )
+72
+polygon( <'fill-rule'>? , [ <length-percentage> <length-percentage> ]# )
+29
+pow( <calc-sum>, <calc-sum> )
+87
+radial-gradient( [ <ending-shape> || <size> ]? [ at <position> ]? , <color-stop-list> )
+61
+ray( <angle> && <ray-size>? && contain? && [at <position>]? )
+29
+rem( <calc-sum>, <calc-sum> )
+91
+repeating-conic-gradient( [ from <angle> ]? [ at <position> ]?, <angular-color-stop-list> )
+83
+repeating-linear-gradient( [ <angle> | to <side-or-corner> ]? , <color-stop-list> )
+97
+repeating-radial-gradient( [ <ending-shape> || <size> ]? [ at <position> ]? , <color-stop-list> )
+167
+rgb( <percentage>{3} [ / <alpha-value> ]? ) | rgb( <number>{3} [ / <alpha-value> ]? ) | rgb( <percentage>#{3} , <alpha-value>? ) | rgb( <number>#{3} , <alpha-value>? )
+171
+rgba( <percentage>{3} [ / <alpha-value> ]? ) | rgba( <number>{3} [ / <alpha-value> ]? ) | rgba( <percentage>#{3} , <alpha-value>? ) | rgba( <number>#{3} , <alpha-value>? )
+30
+rotate( [ <angle> | <zero> ] )
+65
+rotate3d( <number> , <number> , <number> , [ <angle> | <zero> ] )
+31
+rotateX( [ <angle> | <zero> ] )
+31
+rotateY( [ <angle> | <zero> ] )
+31
+rotateZ( [ <angle> | <zero> ] )
+53
+round( <rounding-strategy>?, <calc-sum>, <calc-sum> )
+40
+saturate( [ <number> | <percentage> ]? )
+42
+scale( [ <number> | <percentage> ]#{1,2} )
+42
+scale3d( [ <number> | <percentage> ]#{3} )
+37
+scaleX( [ <number> | <percentage> ] )
+37
+scaleY( [ <number> | <percentage> ] )
+37
+scaleZ( [ <number> | <percentage> ] )
+35
+scroll( [ <scroller> || <axis> ]? )
+37
+sepia( [ <number> | <percentage> ]? )
+18
+sign( <calc-sum> )
+17
+sin( <calc-sum> )
+52
+skew( [ <angle> | <zero> ] , [ <angle> | <zero> ]? )
+29
+skewX( [ <angle> | <zero> ] )
+29
+skewY( [ <angle> | <zero> ] )
+18
+sqrt( <calc-sum> )
+17
+tan( <calc-sum> )
+74
+target-counter( [ <string> | <url> ] , <custom-ident> , <counter-style>? )
+86
+target-counters( [ <string> | <url> ] , <custom-ident> , <string> , <counter-style>? )
+82
+target-text( [ <string> | <url> ] , [ content | before | after | first-letter ]? )
+55
+translate( <length-percentage> , <length-percentage>? )
+67
+translate3d( <length-percentage> , <length-percentage> , <length> )
+33
+translateX( <length-percentage> )
+33
+translateY( <length-percentage> )
+22
+translateZ( <length> )
+52
+var( <custom-property-name> , <declaration-value>? )
+42
+view([<axis> || <'view-timeline-inset'>]?)
+19
+<declaration-value>
+12
+false | true
+17
+tb | rl | bt | lr
+14
+none | chained
+61
+<'-ms-content-zoom-limit-min'> <'-ms-content-zoom-limit-max'>
+12
+<percentage>
+12
+<percentage>
+66
+<'-ms-content-zoom-snap-type'> || <'-ms-content-zoom-snap-points'>
+70
+snapInterval( <percentage>, <percentage> ) | snapList( <percentage># )
+28
+none | proximity | mandatory
+11
+none | zoom
+8
+<string>
+26
+[ none | <custom-ident> ]#
+26
+[ none | <custom-ident> ]#
+39
+none | <track-list> | <auto-track-list>
+39
+none | <track-list> | <auto-track-list>
+11
+auto | none
+21
+auto | <integer>{1,3}
+20
+no-limit | <integer>
+23
+<percentage> | <length>
+12
+auto | after
+50
+auto | none | scrollbar | -ms-autohiding-scrollbar
+14
+chained | none
+107
+<'-ms-scroll-limit-x-min'> <'-ms-scroll-limit-y-min'> <'-ms-scroll-limit-x-max'> <'-ms-scroll-limit-y-max'>
+15
+auto | <length>
+8
+<length>
+15
+auto | <length>
+8
+<length>
+13
+none | railed
+91
+snapInterval( <length-percentage>, <length-percentage> ) | snapList( <length-percentage># )
+91
+snapInterval( <length-percentage>, <length-percentage> ) | snapList( <length-percentage># )
+28
+none | proximity | mandatory
+53
+<'-ms-scroll-snap-type'> <'-ms-scroll-snap-points-x'>
+53
+<'-ms-scroll-snap-type'> <'-ms-scroll-snap-points-y'>
+29
+none | vertical-to-horizontal
+7
+<color>
+7
+<color>
+7
+<color>
+7
+<color>
+7
+<color>
+7
+<color>
+7
+<color>
+7
+<color>
+84
+none | ideograph-alpha | ideograph-numeric | ideograph-parenthesis | ideograph-space
+15
+grippers | none
+21
+none | element | text
+43
+auto | both | start | end | maximum | clear
+8
+<length>
+11
+wrap | none
+1972
+none | button | button-arrow-down | button-arrow-next | button-arrow-previous | button-arrow-up | button-bevel | button-focus | caret | checkbox | checkbox-container | checkbox-label | checkmenuitem | dualbutton | groupbox | listbox | listitem | menuarrow | menubar | menucheckbox | menuimage | menuitem | menuitemtext | menulist | menulist-button | menulist-text | menulist-textfield | menupopup | menuradio | menuseparator | meterbar | meterchunk | progressbar | progressbar-vertical | progresschunk | progresschunk-vertical | radio | radio-container | radio-label | radiomenuitem | range | range-thumb | resizer | resizerpanel | scale-horizontal | scalethumbend | scalethumb-horizontal | scalethumbstart | scalethumbtick | scalethumb-vertical | scale-vertical | scrollbarbutton-down | scrollbarbutton-left | scrollbarbutton-right | scrollbarbutton-up | scrollbarthumb-horizontal | scrollbarthumb-vertical | scrollbartrack-horizontal | scrollbartrack-vertical | searchfield | separator | sheet | spinner | spinner-downbutton | spinner-textfield | spinner-upbutton | splitter | statusbar | statusbarpanel | tab | tabpanel | tabpanels | tab-scroll-arrow-back | tab-scroll-arrow-forward | textfield | textfield-multiline | toolbar | toolbarbutton | toolbarbutton-dropdown | toolbargripper | toolbox | tooltip | treeheader | treeheadercell | treeheadersortarrow | treeitem | treeline | treetwisty | treetwistyopen | treeview | -moz-mac-unified-toolbar | -moz-win-borderless-glass | -moz-win-browsertabbar-toolbox | -moz-win-communicationstext | -moz-win-communications-toolbox | -moz-win-exclude-glass | -moz-win-glass | -moz-win-mediatext | -moz-win-media-toolbox | -moz-window-button-box | -moz-window-button-box-maximized | -moz-window-button-close | -moz-window-button-maximize | -moz-window-button-minimize | -moz-window-button-restore | -moz-window-frame-bottom | -moz-window-frame-left | -moz-window-frame-right | -moz-window-titlebar | -moz-window-titlebar-maximized
+12
+<url> | none
+15
+<color>+ | none
+15
+<color>+ | none
+15
+<color>+ | none
+15
+<color>+ | none
+57
+none | [ fill | fill-opacity | stroke | stroke-opacity ]#
+51
+border-box | content-box | margin-box | padding-box
+5
+0 | 1
+14
+<shape> | auto
+38
+inline | block | horizontal | vertical
+50
+<outline-radius>{1,4} [ / <outline-radius>{1,4} ]?
+16
+<outline-radius>
+16
+<outline-radius>
+16
+<outline-radius>
+16
+<outline-radius>
+23
+ignore | stretch-to-fit
+12
+none | blink
+94
+ignore | normal | select-after | select-before | select-menu | select-same | select-all | none
+32
+auto | none | enabled | disabled
+35
+read-only | read-write | write-only
+14
+drag | no-drag
+39
+default | menu | tooltip | sheet | none
+1002
+none | button | button-bevel | caret | checkbox | default-button | inner-spin-button | listbox | listitem | media-controls-background | media-controls-fullscreen-background | media-current-time-display | media-enter-fullscreen-button | media-exit-fullscreen-button | media-fullscreen-button | media-mute-button | media-overlay-play-button | media-play-button | media-seek-back-button | media-seek-forward-button | media-slider | media-sliderthumb | media-time-remaining-display | media-toggle-closed-captions-button | media-volume-slider | media-volume-slider-container | media-volume-sliderthumb | menulist | menulist-button | menulist-text | menulist-textfield | meter | progress-bar | progress-bar-value | push-button | radio | searchfield | searchfield-cancel-button | searchfield-decoration | searchfield-results-button | searchfield-results-decoration | slider-horizontal | slider-vertical | sliderthumb-horizontal | sliderthumb-vertical | square-button | textarea | textfield | -apple-pay-button
+47
+<'border-width'> || <'border-style'> || <color>
+7
+<color>
+16
+<'border-style'>
+16
+<'border-width'>
+52
+[ above | below | right | left ]? <length>? <image>?
+16
+none | <integer>
+175
+[ <mask-reference> || <position> [ / <bg-size> ]? || <repeat-style> || [ <visual-box> | border | padding | content | text ] || [ <visual-box> | border | padding | content ] ]#
+13
+<attachment>#
+62
+[ <coord-box> | no-clip | border | padding | content | text ]#
+18
+<composite-style>#
+17
+<mask-reference>#
+45
+[ <coord-box> | border | padding | content ]#
+11
+<position>#
+48
+[ <length-percentage> | left | center | right ]#
+48
+[ <length-percentage> | top | center | bottom ]#
+15
+<repeat-style>#
+34
+repeat | no-repeat | space | round
+34
+repeat | no-repeat | space | round
+10
+<bg-size>#
+12
+auto | touch
+7
+<color>
+7
+<color>
+19
+<length> || <color>
+7
+<color>
+8
+<length>
+14
+default | none
+50
+read-only | read-write | read-write-plaintext-only
+24
+auto | text | none | all
+14
+auto | <color>
+95
+normal | <baseline-position> | <content-distribution> | <overflow-position>? <content-position>
+81
+normal | stretch | <baseline-position> | [ <overflow-position>? <self-position> ]
+84
+auto | normal | stretch | <baseline-position> | <overflow-position>? <self-position>
+100
+[ normal | <baseline-position> | <content-distribution> | <overflow-position>? <content-position> ]#
+49
+initial | inherit | unset | revert | revert-layer
+22
+none | <dashed-ident>#
+28
+none | all | <dashed-ident>#
+19
+<single-animation>#
+31
+<single-animation-composition>#
+7
+<time>#
+29
+<single-animation-direction>#
+7
+<time>#
+29
+<single-animation-fill-mode>#
+35
+<single-animation-iteration-count>#
+28
+[ none | <keyframes-name> ]#
+30
+<single-animation-play-state>#
+55
+[ <'animation-range-start'> <'animation-range-end'>? ]#
+78
+[ normal | <length-percentage> | <timeline-range-name> <length-percentage>? ]#
+78
+[ normal | <length-percentage> | <timeline-range-name> <length-percentage>? ]#
+28
+<single-animation-timeline>#
+18
+<easing-function>#
+57
+none | auto | textfield | menulist-button | <compat-auto>
+15
+auto || <ratio>
+29
+none | <filter-function-list>
+16
+visible | hidden
+34
+[ <bg-layer> , ]* <final-bg-layer>
+13
+<attachment>#
+13
+<blend-mode>#
+10
+<bg-clip>#
+7
+<color>
+11
+<bg-image>#
+13
+<visual-box>#
+14
+<bg-position>#
+75
+[ center | [ [ left | right | x-start | x-end ]? <length-percentage>? ]! ]#
+75
+[ center | [ [ top | bottom | y-start | y-end ]? <length-percentage>? ]! ]#
+15
+<repeat-style>#
+10
+<bg-size>#
+9
+<'width'>
+39
+<line-width> || <line-style> || <color>
+22
+<'border-block-start'>
+25
+<'border-top-color'>{1,2}
+55
+<'border-top-width'> || <'border-top-style'> || <color>
+20
+<'border-top-color'>
+20
+<'border-top-style'>
+20
+<'border-top-width'>
+55
+<'border-top-width'> || <'border-top-style'> || <color>
+20
+<'border-top-color'>
+20
+<'border-top-style'>
+20
+<'border-top-width'>
+25
+<'border-top-style'>{1,2}
+25
+<'border-top-width'>{1,2}
+39
+<line-width> || <line-style> || <color>
+20
+<'border-top-color'>
+24
+<length-percentage>{1,2}
+24
+<length-percentage>{1,2}
+12
+<line-style>
+12
+<line-width>
+19
+collapse | separate
+12
+<color>{1,4}
+26
+<'border-top-left-radius'>
+26
+<'border-top-left-radius'>
+160
+<'border-image-source'> || <'border-image-slice'> [ / <'border-image-width'> | / <'border-image-width'>? / <'border-image-outset'> ]? || <'border-image-repeat'>
+28
+[ <length> | <number> ]{1,4}
+41
+[ stretch | repeat | round | space ]{1,2}
+33
+<number-percentage>{1,4} && fill?
+14
+none | <image>
+46
+[ <length-percentage> | <number> | auto ]{1,4}
+22
+<'border-block-start'>
+25
+<'border-top-color'>{1,2}
+55
+<'border-top-width'> || <'border-top-style'> || <color>
+20
+<'border-top-color'>
+20
+<'border-top-style'>
+20
+<'border-top-width'>
+55
+<'border-top-width'> || <'border-top-style'> || <color>
+20
+<'border-top-color'>
+20
+<'border-top-style'>
+20
+<'border-top-width'>
+25
+<'border-top-style'>{1,2}
+25
+<'border-top-width'>{1,2}
+39
+<line-width> || <line-style> || <color>
+7
+<color>
+12
+<line-style>
+12
+<line-width>
+56
+<length-percentage>{1,4} [ / <length-percentage>{1,4} ]?
+39
+<line-width> || <line-style> || <color>
+7
+<color>
+12
+<line-style>
+12
+<line-width>
+18
+<length> <length>?
+26
+<'border-top-left-radius'>
+26
+<'border-top-left-radius'>
+17
+<line-style>{1,4}
+39
+<line-width> || <line-style> || <color>
+7
+<color>
+24
+<length-percentage>{1,2}
+24
+<length-percentage>{1,2}
+12
+<line-style>
+12
+<line-width>
+17
+<line-width>{1,4}
+30
+<length> | <percentage> | auto
+41
+start | center | end | baseline | stretch
+13
+slice | clone
+26
+normal | reverse | inherit
+8
+<number>
+9
+<integer>
+17
+single | multiple
+9
+<integer>
+58
+horizontal | vertical | inline-axis | block-axis | inherit
+30
+start | center | end | justify
+16
+none | <shadow>#
+24
+content-box | border-box
+126
+auto | avoid | always | all | avoid-page | page | left | right | recto | verso | avoid-column | column | avoid-region | region
+126
+auto | avoid | always | all | avoid-page | page | left | right | recto | verso | avoid-column | column | avoid-region | region
+55
+auto | avoid | avoid-page | avoid-column | avoid-region
+12
+top | bottom
+34
+<'caret-color'> || <'caret-shape'>
+14
+auto | <color>
+31
+auto | bar | block | underscore
+54
+none | left | right | both | inline-start | inline-end
+14
+<shape> | auto
+58
+<clip-source> | [ <basic-shape> || <geometry-box> ] | none
+17
+nonzero | evenodd
+7
+<color>
+23
+auto | sRGB | linearRGB
+52
+normal | [ light | dark | <custom-ident> ]+ && only?
+16
+<integer> | auto
+14
+auto | balance
+28
+normal | <length-percentage>
+71
+<'column-rule-width'> || <'column-rule-style'> || <'column-rule-color'>
+7
+<color>
+16
+<'border-style'>
+16
+<'border-width'>
+10
+none | all
+15
+<length> | auto
+36
+<'column-width'> || <'column-count'>
+81
+none | strict | content | [ [ size || inline-size ] || layout || style || paint ]
+25
+auto? [ none | <length> ]
+25
+auto? [ none | <length> ]
+25
+auto? [ none | <length> ]
+34
+[ auto? [ none | <length> ] ]{1,2}
+25
+auto? [ none | <length> ]
+44
+<'container-name'> [ / <'container-type'> ]?
+22
+none | <custom-ident>+
+27
+normal | size | inline-size
+90
+normal | none | [ <content-replacement> | <content-list> ] [/ [ <string> | <counter> ]+ ]?
+23
+visible | auto | hidden
+37
+[ <counter-name> <integer>? ]+ | none
+74
+[ <counter-name> <integer>? | <reversed-counter-name> <integer>? ]+ | none
+37
+[ <counter-name> <integer>? ]+ | none
+415
+[ [ <url> [ <x> <y> ]? , ]* [ auto | default | none | context-menu | help | pointer | progress | wait | cell | crosshair | text | vertical-text | alias | copy | move | no-drop | not-allowed | e-resize | n-resize | ne-resize | nw-resize | s-resize | se-resize | sw-resize | w-resize | ew-resize | ns-resize | nesw-resize | nwse-resize | col-resize | row-resize | all-scroll | zoom-in | zoom-out | grab | grabbing ] ]
+23
+<length> | <percentage>
+23
+<length> | <percentage>
+21
+none | path(<string>)
+9
+ltr | rtl
+118
+[ <display-outside> || <display-inside> ] | <display-listitem> | <display-internal> | <display-box> | <display-legacy>
+100
+auto | text-bottom | alphabetic | ideographic | middle | central | mathematical | hanging | text-top
+11
+show | hide
+15
+content | fixed
+7
+<paint>
+11
+<'opacity'>
+17
+nonzero | evenodd
+29
+none | <filter-function-list>
+59
+none | [ <'flex-grow'> <'flex-shrink'>? || <'flex-basis'> ]
+19
+content | <'width'>
+43
+row | row-reverse | column | column-reverse
+35
+<'flex-direction'> || <'flex-wrap'>
+8
+<number>
+8
+<number>
+28
+nowrap | wrap | wrap-reverse
+47
+left | right | none | inline-start | inline-end
+7
+<color>
+11
+<'opacity'>
+206
+[ [ <'font-style'> || <font-variant-css21> || <'font-weight'> || <'font-stretch'> ]? <'font-size'> [ / <'line-height'> ]? <'font-family'> ] | caption | icon | menu | message-box | small-caption | status-bar
+37
+[ <family-name> | <generic-family> ]#
+29
+normal | <feature-tag-value>#
+20
+auto | normal | none
+17
+normal | <string>
+11
+auto | none
+62
+normal | light | dark | <palette-identifier> | <palette-mix()>
+55
+<absolute-size> | <relative-size> | <length-percentage>
+93
+none | [ ex-height | cap-height | ch-width | ic-width | ic-height ]? [ from-font | <number> ]
+50
+auto | never | always | <absolute-size> | <length>
+23
+<font-stretch-absolute>
+34
+normal | italic | oblique <angle>?
+51
+none | [ weight || style || small-caps || position]
+11
+auto | none
+11
+auto | none
+11
+auto | none
+11
+auto | none
+642
+normal | none | [ <common-lig-values> || <discretionary-lig-values> || <historical-lig-values> || <contextual-alt-values> || stylistic( <feature-value-name> ) || historical-forms || styleset( <feature-value-name># ) || character-variant( <feature-value-name># ) || swash( <feature-value-name> ) || ornaments( <feature-value-name> ) || annotation( <feature-value-name> ) || [ small-caps | all-small-caps | petite-caps | all-petite-caps | unicase | titling-caps ] || <numeric-figure-values> || <numeric-spacing-values> || <numeric-fraction-values> || ordinal || slashed-zero || <east-asian-variant-values> || <east-asian-width-values> || ruby ]
+257
+normal | [ stylistic( <feature-value-name> ) || historical-forms || styleset( <feature-value-name># ) || character-variant( <feature-value-name># ) || swash( <feature-value-name> ) || ornaments( <feature-value-name> ) || annotation( <feature-value-name> ) ]
+93
+normal | small-caps | all-small-caps | petite-caps | all-petite-caps | unicase | titling-caps
+77
+normal | [ <east-asian-variant-values> || <east-asian-width-values> || ruby ]
+31
+normal | text | emoji | unicode
+123
+normal | none | [ <common-lig-values> || <discretionary-lig-values> || <historical-lig-values> || <contextual-alt-values> ]
+120
+normal | [ <numeric-figure-values> || <numeric-spacing-values> || <numeric-fraction-values> || ordinal || slashed-zero ]
+20
+normal | sub | super
+31
+normal | [ <string> <number> ]#
+41
+<font-weight-absolute> | bolder | lighter
+35
+auto | none | preserve-parent-color
+27
+<'row-gap'> <'column-gap'>?
+165
+<'grid-template'> | <'grid-template-rows'> / [ auto-flow && dense? ] <'grid-auto-columns'>? | [ auto-flow && dense? ] <'grid-auto-rows'>? / <'grid-template-columns'>
+34
+<grid-line> [ / <grid-line> ]{0,3}
+13
+<track-size>+
+25
+[ row | column ] || dense
+13
+<track-size>+
+30
+<grid-line> [ / <grid-line> ]?
+11
+<grid-line>
+19
+<length-percentage>
+11
+<grid-line>
+37
+<'grid-row-gap'> <'grid-column-gap'>?
+30
+<grid-line> [ / <grid-line> ]?
+11
+<grid-line>
+19
+<length-percentage>
+11
+<grid-line>
+148
+none | [ <'grid-template-rows'> / <'grid-template-columns'> ] | [ <line-names>? <string> <track-size>? <line-names>? ]+ [ / <explicit-track-list> ]?
+16
+none | <string>+
+67
+none | <track-list> | <auto-track-list> | subgrid <line-name-list>?
+67
+none | <track-list> | <auto-track-list> | subgrid <line-name-list>?
+53
+none | [ first || [ force-end | allow-end ] || last ]
+153
+auto | <length-percentage [0,∞]> | min-content | max-content | fit-content | fit-content(<length-percentage [0,∞]>) | <calc-size()> | <anchor-size()>
+15
+auto | <string>
+25
+[ auto | <integer> ]{1,3}
+20
+none | manual | auto
+40
+from-image | <angle> | [ <angle>? flip ]
+39
+auto | crisp-edges | pixelated | smooth
+39
+[ from-image || <resolution> ] && snap?
+44
+auto | normal | active | inactive | disabled
+32
+normal | [ <number> <integer>? ]
+45
+[ auto | alphabetic | hanging | ideographic ]
+9
+<'width'>
+12
+<'top'>{1,4}
+12
+<'top'>{1,2}
+7
+<'top'>
+7
+<'top'>
+12
+<'top'>{1,2}
+7
+<'top'>
+7
+<'top'>
+29
+numeric-only | allow-keywords
+14
+auto | isolate
+92
+normal | <content-distribution> | <overflow-position>? [ <content-position> | left | right ]
+143
+normal | stretch | <baseline-position> | <overflow-position>? [ <self-position> | left | right ] | legacy | legacy && [ left | right | center ]
+103
+auto | normal | stretch | <baseline-position> | <overflow-position>? [ <self-position> | left | right ]
+97
+[ normal | <content-distribution> | <overflow-position>? [ <content-position> | left | right ] ]#
+30
+<length> | <percentage> | auto
+17
+normal | <length>
+7
+<color>
+41
+auto | loose | normal | strict | anywhere
+16
+none | <integer>
+43
+normal | <number> | <length> | <percentage>
+8
+<length>
+70
+<'list-style-type'> || <'list-style-position'> || <'list-style-image'>
+14
+<image> | none
+16
+inside | outside
+33
+<counter-style> | <string> | none
+19
+<'margin-top'>{1,4}
+19
+<'margin-top'>{1,2}
+14
+<'margin-top'>
+14
+<'margin-top'>
+26
+<length-percentage> | auto
+19
+<'margin-top'>{1,2}
+14
+<'margin-top'>
+14
+<'margin-top'>
+26
+<length-percentage> | auto
+26
+<length-percentage> | auto
+26
+<length-percentage> | auto
+20
+none | in-flow | all
+12
+none | <url>
+12
+none | <url>
+12
+none | <url>
+12
+none | <url>
+13
+<mask-layer>#
+157
+<'mask-border-source'> || <'mask-border-slice'> [ / <'mask-border-width'>? [ / <'mask-border-outset'> ]? ]? || <'mask-border-repeat'> || <'mask-border-mode'>
+17
+luminance | alpha
+28
+[ <length> | <number> ]{1,4}
+41
+[ stretch | repeat | round | space ]{1,2}
+30
+<number-percentage>{1,4} fill?
+14
+none | <image>
+46
+[ <length-percentage> | <number> | auto ]{1,4}
+26
+[ <coord-box> | no-clip ]#
+23
+<compositing-operator>#
+17
+<mask-reference>#
+15
+<masking-mode>#
+12
+<coord-box>#
+11
+<position>#
+15
+<repeat-style>#
+10
+<bg-size>#
+17
+luminance | alpha
+47
+[ pack | next ] || [ definite-first | ordered ]
+37
+auto-add | add(<integer>) | <integer>
+16
+normal | compact
+16
+normal | compact
+13
+<'max-width'>
+153
+none | <length-percentage [0,∞]> | min-content | max-content | fit-content | fit-content(<length-percentage [0,∞]>) | <calc-size()> | <anchor-size()>
+13
+<'max-width'>
+16
+none | <integer>
+153
+none | <length-percentage [0,∞]> | min-content | max-content | fit-content | fit-content(<length-percentage [0,∞]>) | <calc-size()> | <anchor-size()>
+13
+<'min-width'>
+153
+auto | <length-percentage [0,∞]> | min-content | max-content | fit-content | fit-content(<length-percentage [0,∞]>) | <calc-size()> | <anchor-size()>
+13
+<'min-width'>
+153
+auto | <length-percentage [0,∞]> | min-content | max-content | fit-content | fit-content(<length-percentage [0,∞]>) | <calc-size()> | <anchor-size()>
+27
+<blend-mode> | plus-lighter
+42
+fill | contain | cover | none | scale-down
+10
+<position>
+117
+[ <'offset-position'>? [ <'offset-path'> [ <'offset-distance'> || <'offset-rotate'> ]? ]? ]! [ / <'offset-anchor'> ]?
+17
+auto | <position>
+19
+<length-percentage>
+35
+none | <offset-path> || <coord-box>
+26
+normal | auto | <position>
+29
+[ auto | reverse ] || <angle>
+15
+<opacity-value>
+9
+<integer>
+9
+<integer>
+63
+[ <'outline-width'> || <'outline-style'> || <'outline-color'> ]
+14
+auto | <color>
+8
+<length>
+27
+auto | <outline-line-style>
+12
+<line-width>
+48
+[ visible | hidden | clip | scroll | auto ]{1,2}
+11
+auto | none
+39
+visible | hidden | clip | scroll | auto
+25
+padding-box | content-box
+32
+<visual-box> || <length [0,∞]>
+39
+visible | hidden | clip | scroll | auto
+30
+normal | break-word | anywhere
+39
+visible | hidden | clip | scroll | auto
+39
+visible | hidden | clip | scroll | auto
+11
+none | auto
+30
+[ contain | none | auto ]{1,2}
+21
+contain | none | auto
+21
+contain | none | auto
+21
+contain | none | auto
+21
+contain | none | auto
+20
+<'padding-top'>{1,4}
+20
+<'padding-top'>{1,2}
+15
+<'padding-top'>
+15
+<'padding-top'>
+27
+<length-percentage [0,∞]>
+20
+<'padding-top'>{1,2}
+15
+<'padding-top'>
+15
+<'padding-top'>
+27
+<length-percentage [0,∞]>
+27
+<length-percentage [0,∞]>
+27
+<length-percentage [0,∞]>
+21
+auto | <custom-ident>
+52
+auto | always | avoid | left | right | recto | verso
+52
+auto | always | avoid | left | right | recto | verso
+12
+auto | avoid
+38
+normal | [ fill || stroke || markers ]
+15
+none | <length>
+10
+<position>
+38
+<'align-content'> <'justify-content'>?
+34
+<'align-items'> <'justify-items'>?
+32
+<'align-self'> <'justify-self'>?
+110
+auto | none | visiblePainted | visibleFill | visibleStroke | visible | painted | fill | stroke | all | inherit
+45
+static | relative | absolute | sticky | fixed
+20
+auto | <anchor-name>
+22
+none | <position-area>
+50
+<'position-try-order'>? <'position-try-fallbacks'>
+64
+none | [ [<dashed-ident> || <try-tactic>] | <'position-area'> ]#
+19
+normal | <try-size>
+60
+always | [ anchors-valid || anchors-visible || no-overflow ]
+15
+economy | exact
+36
+none | auto | [ <string> <string> ]+
+23
+<length> | <percentage>
+52
+none | both | horizontal | vertical | block | inline
+30
+<length> | <percentage> | auto
+55
+none | <angle> | [ x | y | z | <number>{3} ] && <angle>
+28
+normal | <length-percentage>
+45
+start | center | space-between | space-around
+26
+separate | collapse | auto
+51
+[ alternate || [ over | under ] ] | inter-character
+23
+<length> | <percentage>
+23
+<length> | <percentage>
+39
+none | [ <number> | <percentage> ]{1,3}
+13
+auto | smooth
+13
+<length>{1,4}
+13
+<length>{1,2}
+8
+<length>
+8
+<length>
+8
+<length>
+13
+<length>{1,2}
+8
+<length>
+8
+<length>
+8
+<length>
+8
+<length>
+8
+<length>
+35
+[ auto | <length-percentage> ]{1,4}
+35
+[ auto | <length-percentage> ]{1,2}
+26
+auto | <length-percentage>
+26
+auto | <length-percentage>
+26
+auto | <length-percentage>
+35
+[ auto | <length-percentage> ]{1,2}
+26
+auto | <length-percentage>
+26
+auto | <length-percentage>
+26
+auto | <length-percentage>
+26
+auto | <length-percentage>
+26
+auto | <length-percentage>
+36
+[ none | start | end | center ]{1,2}
+18
+none | <position>#
+10
+<position>
+36
+none | repeat( <length-percentage> )
+36
+none | repeat( <length-percentage> )
+15
+normal | always
+67
+none | [ x | y | block | inline | both ] [ mandatory | proximity ]?
+28
+none | mandatory | proximity
+28
+none | mandatory | proximity
+55
+[ <'scroll-timeline-name'> <'scroll-timeline-axis'>? ]#
+27
+[ block | inline | x | y ]#
+26
+[ none | <dashed-ident> ]#
+17
+auto | <color>{2}
+28
+auto | stable && both-edges?
+18
+auto | thin | none
+15
+<opacity-value>
+19
+<length-percentage>
+49
+none | [ <shape-box> || <basic-shape> ] | <image>
+54
+auto | optimizeSpeed | crispEdges | geometricPrecision
+72
+normal | spell-out || digits || [ literal-punctuation | no-punctuation ]
+9
+<'color'>
+11
+<'opacity'>
+7
+<paint>
+18
+none | <dasharray>
+30
+<length-percentage> | <number>
+21
+butt | round | square
+41
+miter | miter-clip | round | bevel | arcs
+8
+<number>
+11
+<'opacity'>
+30
+<length-percentage> | <number>
+20
+<integer> | <length>
+12
+auto | fixed
+60
+start | end | left | right | center | justify | match-parent
+52
+auto | start | end | left | right | center | justify
+20
+start | middle | end
+47
+normal | <'text-box-trim'> || <'text-box-edge'>
+18
+auto | <text-edge>
+40
+none | trim-start | trim-end | trim-both
+34
+none | all | [ digits <integer>? ]
+115
+<'text-decoration-line'> || <'text-decoration-style'> || <'text-decoration-color'> || <'text-decoration-thickness'>
+7
+<color>
+90
+none | [ underline || overline || line-through || blink ] | spelling-error | grammar-error
+99
+none | [ objects || [ spaces | [ leading-spaces || trailing-spaces ] ] || edges || box-decoration ]
+17
+auto | all | none
+39
+solid | double | dotted | dashed | wavy
+43
+auto | from-font | <length> | <percentage> 
+50
+<'text-emphasis-style'> || <'text-emphasis-color'>
+7
+<color>
+44
+auto | [ over | under ] && [ right | left ]?
+95
+none | [ [ filled | open ] || [ dot | circle | double-circle | triangle | sesame ] ] | <string>
+45
+<length-percentage> && hanging? && each-line?
+42
+auto | inter-character | inter-word | none
+26
+mixed | upright | sideways
+35
+[ clip | ellipsis | <string> ]{1,2}
+62
+auto | optimizeSpeed | optimizeLegibility | geometricPrecision
+18
+none | <shadow-t>#
+26
+none | auto | <percentage>
+45
+space-all | normal | space-first | trim-start
+71
+none | capitalize | uppercase | lowercase | full-width | full-size-kana
+31
+auto | <length> | <percentage> 
+48
+auto | from-font | [ under || [ left | right ] ]
+41
+<'text-wrap-mode'> || <'text-wrap-style'>
+13
+wrap | nowrap
+32
+auto | balance | stable | pretty
+22
+none | <dashed-ident>#
+30
+<length> | <percentage> | auto
+112
+auto | none | [ [ pan-x | pan-left | pan-right ] || [ pan-y | pan-up | pan-down ] || pinch-zoom ] | manipulation
+23
+none | <transform-list>
+59
+content-box | border-box | fill-box | stroke-box | view-box
+177
+[ <length-percentage> | left | center | right | top | bottom ] | [ [ <length-percentage> | left | center | right ] && [ <length-percentage> | top | center | bottom ] ] <length>?
+18
+flat | preserve-3d
+20
+<single-transition>#
+28
+<transition-behavior-value>#
+7
+<time>#
+7
+<time>#
+36
+none | <single-transition-property>#
+18
+<easing-function>#
+61
+none | <length-percentage> [ <length-percentage> <length>? ]?
+71
+normal | embed | isolate | bidi-override | isolate-override | plaintext
+24
+auto | text | none | all
+76
+none | non-scaling-stroke | non-scaling-size | non-rotation | fixed-position
+97
+baseline | sub | super | text-top | text-bottom | middle | top | bottom | <percentage> | <length>
+51
+[ <'view-timeline-name'> <'view-timeline-axis'>? ]#
+27
+[ block | inline | x | y ]#
+40
+[ [ auto | <length-percentage> ]{1,2} ]#
+22
+none | <dashed-ident>#
+21
+none | <custom-ident>
+27
+visible | hidden | collapse
+106
+normal | pre | nowrap | pre-wrap | pre-line | break-spaces | [ <'white-space-collapse'> || <'text-wrap'> ]
+70
+collapse | preserve | preserve-breaks | preserve-spaces | break-spaces
+9
+<integer>
+153
+auto | <length-percentage [0,∞]> | min-content | max-content | fit-content | fit-content(<length-percentage [0,∞]>) | <calc-size()> | <anchor-size()>
+29
+auto | <animateable-feature>#
+56
+normal | break-all | keep-all | break-word | auto-phrase
+17
+normal | <length>
+19
+normal | break-word
+69
+horizontal-tb | vertical-rl | vertical-lr | sideways-rl | sideways-lr
+23
+<length> | <percentage>
+23
+<length> | <percentage>
+16
+auto | <integer>
+40
+normal | reset | <number> | <percentage>
+7
+element
+6
+.class
+3
+#id
+1
+*
+12
+[attr=value]
+1
+,
+5
+A + B
+5
+A ~ B
+5
+A > B
+3
+A B
+6
+A || B
+1
+:
+2
+::
+7
+:active
+23
+:active-view-transition
+47
+:active-view-transition-type( <custom-ident># )
+9
+:any-link
+9
+:autofill
+6
+:blank
+10
+:buffering
+8
+:checked
+8
+:current
+8
+:default
+8
+:defined
+21
+:dir( [ ltr | rtl ] )
+9
+:disabled
+6
+:empty
+8
+:enabled
+6
+:first
+12
+:first-child
+14
+:first-of-type
+6
+:focus
+14
+:focus-visible
+13
+:focus-within
+11
+:fullscreen
+7
+:future
+42
+:has( <forgiving-relative-selector-list> )
+12
+:has-slotted
+5
+:host
+28
+:host( <compound-selector> )
+36
+:host-context( <compound-selector> )
+6
+:hover
+9
+:in-range
+14
+:indeterminate
+8
+:invalid
+32
+:is( <forgiving-selector-list> )
+24
+:lang( <language-code> )
+11
+:last-child
+13
+:last-of-type
+5
+:left
+5
+:link
+11
+:local-link
+6
+:modal
+6
+:muted
+31
+:not( <complex-selector-list> )
+51
+:nth-child( <nth> [ of <complex-selector-list> ]? )
+56
+:nth-last-child( <nth> [ of <complex-selector-list> ]? )
+26
+:nth-last-of-type( <nth> )
+21
+:nth-of-type( <nth> )
+11
+:only-child
+13
+:only-of-type
+9
+:optional
+13
+:out-of-range
+5
+:past
+7
+:paused
+19
+:picture-in-picture
+18
+:placeholder-shown
+8
+:playing
+13
+:popover-open
+10
+:read-only
+11
+:read-write
+9
+:required
+6
+:right
+5
+:root
+6
+:scope
+8
+:seeking
+8
+:stalled
+24
+:state( <custom-ident> )
+7
+:target
+14
+:target-within
+13
+:user-invalid
+11
+:user-valid
+6
+:valid
+8
+:visited
+14
+:volume-locked
+33
+:where( <complex-selector-list> )
+11
+:xr-overlay
+12
+::-ms-browse
+11
+::-ms-check
+11
+::-ms-clear
+12
+::-ms-expand
+10
+::-ms-fill
+16
+::-ms-fill-lower
+16
+::-ms-fill-upper
+12
+::-ms-reveal
+11
+::-ms-thumb
+17
+::-ms-ticks-after
+18
+::-ms-ticks-before
+13
+::-ms-tooltip
+11
+::-ms-track
+11
+::-ms-value
+19
+::-moz-progress-bar
+21
+::-moz-range-progress
+18
+::-moz-range-thumb
+18
+::-moz-range-track
+22
+::-webkit-progress-bar
+30
+::-webkit-progress-inner-value
+24
+::-webkit-progress-value
+31
+::-webkit-slider-runnable-track
+22
+::-webkit-slider-thumb
+7
+::after
+10
+::backdrop
+8
+::before
+5
+::cue
+19
+::cue( <selector> )
+12
+::cue-region
+26
+::cue-region( <selector> )
+17
+::details-content
+22
+::file-selector-button
+14
+::first-letter
+12
+::first-line
+15
+::grammar-error
+29
+::highlight( <custom-ident> )
+8
+::marker
+18
+::part( <ident>+ )
+13
+::placeholder
+11
+::selection
+32
+::slotted( <compound-selector> )
+16
+::spelling-error
+13
+::target-text
+17
+::view-transition
+49
+::view-transition-group([ '*' | <custom-ident> ])
+54
+::view-transition-image-pair([ '*' | <custom-ident> ])
+47
+::view-transition-new([ '*' | <custom-ident> ])
+47
+::view-transition-old([ '*' | <custom-ident> ])
+17
+abs( <calc-sum> )
+76
+xx-small | x-small | small | medium | large | x-large | xx-large | xxx-large
+18
+acos( <calc-sum> )
+23
+<number> | <percentage>
+63
+anchor( <anchor-name>? && <anchor-side>, <length-percentage>? )
+14
+<dashed-ident>
+108
+inside | outside | top | left | right | bottom | start | end | self-start | self-end | <percentage> | center
+58
+width | height | block | inline | self-block | self-inline
+73
+anchor-size( [ <anchor-name> || <anchor-size> ]? , <length-percentage>? )
+22
+<angle> | <percentage>
+18
+<angle-percentage>
+30
+<color> && <color-stop-angle>?
+74
+[ <angular-color-stop> [, <angular-color-hint>]? ]# , <angular-color-stop>
+43
+scroll-position | contents | <custom-ident>
+18
+asin( <calc-sum> )
+18
+atan( <calc-sum> )
+31
+atan2( <calc-sum>, <calc-sum> )
+22
+scroll | fixed | local
+57
+attr( <attr-name> <type-or-unit>? [, <attr-fallback> ]? )
+36
+[ '~' | '|' | '^' | '$' | '*' ]? '='
+5
+i | s
+104
+'[' <wq-name> ']' | '[' <wq-name> <attr-matcher> [ <string-token> | <ident-token> ] <attr-modifier>? ']'
+82
+repeat( [ auto-fill | auto-fit ] , [ <line-names>? <fixed-size> ]+ <line-names>? )
+147
+[ <line-names>? [ <fixed-size> | <fixed-repeat> ] ]* <line-names>? <auto-repeat>
+[ <line-names>? [ <fixed-size> | <fixed-repeat> ] ]* <line-names>?
+22
+block | inline | x | y
+26
+[ first | last ]? baseline
+61
+<inset()> | <circle()> | <ellipse()> | <polygon()> | <path()>
+33
+<visual-box> | border-area | text
+14
+none | <image>
+110
+<bg-image> || <bg-position> [ / <bg-size> ]? || <repeat-style> || <attachment> || <visual-box> || <visual-box>
+271
+[ [ left | center | right | top | bottom | <length-percentage> ] | [ left | center | right | <length-percentage> ] [ top | center | bottom | <length-percentage> ] | [ center | [ left | right ] <length-percentage>? ] && [ center | [ top | bottom ] <length-percentage>? ] ]
+53
+[ <length-percentage> | auto ]{1,2} | cover | contain
+173
+normal | multiply | screen | overlay | darken | lighten | color-dodge | color-burn | hard-light | soft-light | difference | exclusion | hue | saturation | color | luminosity
+17
+blur( <length>? )
+42
+brightness( [ <number> | <percentage> ]? )
+18
+calc( <calc-sum> )
+35
+e | pi | infinity | -infinity | NaN
+49
+<calc-value> [ '*' <calc-value> | '/' <number> ]*
+42
+calc-size( <calc-size-basis>, <calc-sum> )
+59
+<intrinsic-size-keyword> | <calc-size()> | any | <calc-sum>
+48
+<calc-product> [ [ '+' | '-' ] <calc-product> ]*
+72
+<number> | <dimension> | <percentage> | <calc-constant> | ( <calc-sum> )
+17
+<image> | <color>
+24
+<percentage>? && <image>
+48
+circle( [ <shape-radius> ]? [ at <position> ]? )
+23
+clamp( <calc-sum>#{3} )
+17
+'.' <ident-token>
+5
+<url>
+89
+<color-base> | currentColor | <system-color> | <light-dark()> | <deprecated-system-color>
+76
+<hex-color> | <color-function> | <named-color> | <color-mix()> | transparent
+105
+<rgb()> | <rgba()> | <hsl()> | <hsla()> | <hwb()> | <lab()> | <lch()> | <oklab()> | <oklch()> | <color()>
+76
+color( [from <color>]? <colorspace-params> [ / [ <alpha-value> | none ] ]? )
+105
+in [ <rectangular-color-space> | <polar-color-space> <hue-interpolation-method>? | <custom-color-space> ]
+83
+color-mix( <color-interpolation-method> , [ <color> && <percentage [0,100]>? ]#{2})
+40
+<color-stop-length> | <color-stop-angle>
+23
+<angle-percentage>{1,2}
+24
+<length-percentage>{1,2}
+71
+[ <linear-color-stop> [, <linear-color-hint>]? ]# , <linear-color-stop>
+58
+[<custom-params> | <predefined-rgb-params> | <xyz-params>]
+26
+'>' | '+' | '~' | [ '||' ]
+42
+[ common-ligatures | no-common-ligatures ]
+144
+searchfield | textarea | push-button | slider-horizontal | checkbox | radio | square-button | menulist | listbox | meter | progress-bar | button
+58
+<compound-selector> [ <combinator>? <compound-selector> ]*
+19
+<complex-selector>#
+144
+clear | copy | source-over | source-in | source-out | source-atop | destination-over | destination-in | destination-out | destination-atop | xor
+36
+add | subtract | intersect | exclude
+98
+[ <type-selector>? <subclass-selector>* [ <pseudo-element-selector> <pseudo-class-selector>* ]* ]!
+20
+<compound-selector>#
+81
+conic-gradient( [ from <angle> ]? [ at <position> ]?, <angular-color-stop-list> )
+53
+space-between | space-around | space-evenly | stretch
+80
+[ <string> | contents | <image> | <counter> | <quote> | <target> | <leader()> ]+
+44
+center | start | end | flex-start | flex-end
+7
+<image>
+30
+[ contextual | no-contextual ]
+40
+contrast( [ <number> | <percentage> ]? )
+22
+<paint-box> | view-box
+17
+cos( <calc-sum> )
+26
+<counter()> | <counters()>
+43
+counter( <counter-name>, <counter-style>? )
+14
+<custom-ident>
+32
+<counter-style-name> | symbols()
+14
+<custom-ident>
+54
+counters( <counter-name>, <string>, <counter-style>? )
+51
+cross-fade( <cf-mixing-image> , <cf-final-image>? )
+106
+ease | ease-in | ease-out | ease-in-out | cubic-bezier(<number [0,1]>, <number>, <number [0,1]>, <number>)
+14
+<dashed-ident>
+50
+<dashed-ident> [ <number> | <percentage> | none ]+
+40
+[ [ <length-percentage> | <number> ]+ ]#
+339
+ActiveBorder | ActiveCaption | AppWorkspace | Background | ButtonHighlight | ButtonShadow | CaptionText | InactiveBorder | InactiveCaption | InactiveCaptionText | InfoBackground | InfoText | Menu | MenuText | Scrollbar | ThreeDDarkShadow | ThreeDFace | ThreeDHighlight | ThreeDLightShadow | ThreeDShadow | Window | WindowFrame | WindowText
+56
+[ discretionary-ligatures | no-discretionary-ligatures ]
+15
+contents | none
+45
+flow | flow-root | table | flex | grid | ruby
+202
+table-row-group | table-header-group | table-footer-group | table-row | table-cell | table-column-group | table-column | table-caption | ruby-base | ruby-text | ruby-base-container | ruby-text-container
+74
+inline-block | inline-list-item | inline-table | inline-flex | inline-grid
+56
+<display-outside>? && [ flow | flow-root ]? && list-item
+23
+block | inline | run-in
+44
+drop-shadow( [ <color>? && <length>{2,3} ] )
+64
+linear | <cubic-bezier-timing-function> | <step-timing-function>
+60
+[ jis78 | jis83 | jis90 | jis04 | simplified | traditional ]
+35
+[ full-width | proportional-width ]
+24
+element( <id-selector> )
+52
+ellipse( [ <shape-radius>{2} ]? [ at <position> ]? )
+16
+circle | ellipse
+44
+env( <custom-ident> , <declaration-value>? )
+17
+exp( <calc-sum> )
+45
+[ <line-names>? <track-size> ]+ <line-names>?
+26
+<string> | <custom-ident>+
+34
+<string> [ <integer> | on | off ]?
+99
+@stylistic | @historical-forms | @styleset | @character-variant | @swash | @ornaments | @annotation
+55
+<feature-type> '{' <feature-value-declaration-list> '}'
+22
+<feature-value-block>+
+27
+<custom-ident>: <integer>+;
+27
+<feature-value-declaration>
+14
+<custom-ident>
+145
+<blur()> | <brightness()> | <contrast()> | <drop-shadow()> | <grayscale()> | <hue-rotate()> | <invert()> | <opacity()> | <saturate()> | <sepia()>
+30
+[ <filter-function> | <url> ]+
+134
+<'background-color'> || <bg-image> || <bg-position> [ / <bg-size> ]? || <repeat-style> || <attachment> || <visual-box> || <visual-box>
+42
+fit-content( <length-percentage [0,∞]> )
+19
+<length-percentage>
+79
+repeat( [ <integer [1,∞]> ] , [ <line-names>? <fixed-size> ]+ <line-names>? )
+112
+<fixed-breadth> | minmax( <fixed-breadth> , <track-breadth> ) | minmax( <inflexible-breadth> , <fixed-breadth> )
+147
+normal | ultra-condensed | extra-condensed | condensed | semi-condensed | semi-expanded | expanded | extra-expanded | ultra-expanded | <percentage>
+23
+[ normal | small-caps ]
+33
+normal | bold | <number [1,1000]>
+26
+<frequency> | <percentage>
+60
+[ <function-token> <any-value> ) ] | ( <ident> <any-value> )
+50
+serif | sans-serif | cursive | fantasy | monospace
+50
+serif | sans-serif | cursive | fantasy | monospace
+46
+<shape-box> | fill-box | stroke-box | view-box
+157
+<linear-gradient()> | <repeating-linear-gradient()> | <radial-gradient()> | <repeating-radial-gradient()> | <conic-gradient()> | <repeating-conic-gradient()>
+41
+grayscale( [ <number> | <percentage> ]? )
+102
+auto | <custom-ident> | [ <integer> && <custom-ident>? ] | [ span && [ <integer> || <custom-ident> ] ]
+50
+[ historical-ligatures | no-historical-ligatures ]
+118
+hsl( <hue> <percentage> <percentage> [ / <alpha-value> ]? ) | hsl( <hue>, <percentage>, <percentage>, <alpha-value>? )
+120
+hsla( <hue> <percentage> <percentage> [ / <alpha-value> ]? ) | hsla( <hue>, <percentage>, <percentage>, <alpha-value>? )
+18
+<number> | <angle>
+50
+[ shorter | longer | increasing | decreasing ] hue
+35
+hue-rotate( [ <angle> | <zero> ]? )
+95
+hwb( [<hue> | none] [<percentage> | none] [<percentage> | none] [ / [<alpha-value> | none] ]? )
+20
+hypot( <calc-sum># )
+12
+<hash-token>
+89
+<url> | <image()> | <image-set()> | <element()> | <paint()> | <cross-fade()> | <gradient>
+51
+image( <image-tags>? [ <image-src>? , <color>? ]! )
+32
+image-set( <image-set-option># )
+57
+[ <image> | <string> ] [ <resolution> || type(<string>) ]
+16
+<url> | <string>
+9
+ltr | rtl
+54
+<length-percentage> | min-content | max-content | auto
+62
+inset( <length-percentage>{1,4} [ round <'border-radius'> ]? )
+38
+invert( [ <number> | <percentage> ]? )
+45
+<keyframe-selector># {
+  <declaration-list>
+}
+17
+<keyframe-block>+
+61
+from | to | <percentage> | <timeline-range-name> <percentage>
+25
+<custom-ident> | <string>
+137
+lab( [<percentage> | <number> | none] [ <percentage> | <number> | none] [ <percentage> | <number> | none] [ / [<alpha-value> | none] ]? )
+21
+layer( <layer-name> )
+24
+<ident> [ '.' <ident> ]*
+119
+lch( [<percentage> | <number> | none] [ <percentage> | <number> | none] [ <hue> | none] [ / [<alpha-value> | none] ]? )
+23
+leader( <leader-type> )
+33
+dotted | solid | space | <string>
+23
+<length> | <percentage>
+30
+light-dark( <color>, <color> )
+33
+[ <line-names> | <name-repeat> ]+
+23
+'[' <custom-ident>* ']'
+82
+none | hidden | dotted | dashed | solid | double | groove | ridge | inset | outset
+32
+<length> | thin | medium | thick
+19
+<length-percentage>
+28
+<color> <color-stop-length>?
+109
+linear-gradient( [ [ <angle> | to <side-or-corner> ] || <color-interpolation-method> ]? , <color-stop-list> )
+30
+log( <calc-sum>, <calc-sum>? )
+159
+<mask-reference> || <position> [ / <bg-size> ]? || <repeat-style> || <geometry-box> || [ <geometry-box> | no-clip ] || <compositing-operator> || <masking-mode>
+96
+[ <length-percentage> | left | center | right ] [ <length-percentage> | top | center | bottom ]?
+30
+none | <image> | <mask-source>
+5
+<url>
+32
+alpha | luminance | match-source
+22
+matrix( <number>#{6} )
+25
+matrix3d( <number>#{16} )
+18
+max( <calc-sum># )
+44
+<media-in-parens> [ and <media-in-parens> ]+
+58
+<media-not> | <media-and> | <media-or> | <media-in-parens>
+45
+<media-not> | <media-and> | <media-in-parens>
+46
+( [ <mf-plain> | <mf-boolean> | <mf-range> ] )
+60
+( <media-condition> ) | <media-feature> | <general-enclosed>
+21
+not <media-in-parens>
+43
+<media-in-parens> [ or <media-in-parens> ]+
+86
+<media-condition> | [ not | only ]? <media-type> [ and <media-condition-without-or> ]?
+14
+<media-query>#
+7
+<ident>
+9
+<mf-name>
+7
+<ident>
+22
+<mf-name> : <mf-value>
+187
+<mf-name> [ '<' | '>' ]? '='? <mf-value>
+| <mf-value> [ '<' | '>' ]? '='? <mf-name>
+| <mf-value> '<' '='? <mf-name> '<' '='? <mf-value>
+| <mf-value> '>' '='? <mf-name> '>' '='? <mf-value>
+42
+<number> | <dimension> | <ident> | <ratio>
+18
+min( <calc-sum># )
+138
+minmax( [ <length-percentage> | min-content | max-content | auto ] , [ <length-percentage> | <flex> | min-content | max-content | auto ] )
+29
+mod( <calc-sum>, <calc-sum> )
+58
+repeat( [ <integer [1,∞]> | auto-fill ], <line-names>+ )
+1763
+aliceblue | antiquewhite | aqua | aquamarine | azure | beige | bisque | black | blanchedalmond | blue | blueviolet | brown | burlywood | cadetblue | chartreuse | chocolate | coral | cornflowerblue | cornsilk | crimson | cyan | darkblue | darkcyan | darkgoldenrod | darkgray | darkgreen | darkgrey | darkkhaki | darkmagenta | darkolivegreen | darkorange | darkorchid | darkred | darksalmon | darkseagreen | darkslateblue | darkslategray | darkslategrey | darkturquoise | darkviolet | deeppink | deepskyblue | dimgray | dimgrey | dodgerblue | firebrick | floralwhite | forestgreen | fuchsia | gainsboro | ghostwhite | gold | goldenrod | gray | green | greenyellow | grey | honeydew | hotpink | indianred | indigo | ivory | khaki | lavender | lavenderblush | lawngreen | lemonchiffon | lightblue | lightcoral | lightcyan | lightgoldenrodyellow | lightgray | lightgreen | lightgrey | lightpink | lightsalmon | lightseagreen | lightskyblue | lightslategray | lightslategrey | lightsteelblue | lightyellow | lime | limegreen | linen | magenta | maroon | mediumaquamarine | mediumblue | mediumorchid | mediumpurple | mediumseagreen | mediumslateblue | mediumspringgreen | mediumturquoise | mediumvioletred | midnightblue | mintcream | mistyrose | moccasin | navajowhite | navy | oldlace | olive | olivedrab | orange | orangered | orchid | palegoldenrod | palegreen | paleturquoise | palevioletred | papayawhip | peachpuff | peru | pink | plum | powderblue | purple | rebeccapurple | red | rosybrown | royalblue | saddlebrown | salmon | sandybrown | seagreen | seashell | sienna | silver | skyblue | slateblue | slategray | slategrey | snow | springgreen | steelblue | tan | teal | thistle | tomato | turquoise | violet | wheat | white | whitesmoke | yellow | yellowgreen
+7
+<ident>
+28
+[ <ident-token> | '*' ]? '|'
+24
+<an-plus-b> | even | odd
+23
+<number> | <percentage>
+31
+[ lining-nums | oldstyle-nums ]
+42
+[ diagonal-fractions | stacked-fractions ]
+36
+[ proportional-nums | tabular-nums ]
+31
+<ray()> | <url> | <basic-shape>
+140
+oklab( [ <percentage> | <number> | none] [ <percentage> | <number> | none] [ <percentage> | <number> | none] [ / [<alpha-value> | none] ]? )
+122
+oklch( [ <percentage> | <number> | none] [ <percentage> | <number> | none] [ <hue> | none] [ / [<alpha-value> | none] ]? )
+39
+opacity( [ <number> | <percentage> ]? )
+23
+<number> | <percentage>
+73
+none | dotted | dashed | solid | double | groove | ridge | inset | outset
+23
+<length> | <percentage>
+13
+unsafe | safe
+65
+<declaration>? [ ; <page-body> ]? | <page-margin-box> <page-body>
+49
+<page-margin-box-type> '{' <declaration-list> '}'
+255
+@top-left-corner | @top-left | @top-center | @top-right | @top-right-corner | @bottom-left-corner | @bottom-left | @bottom-center | @bottom-right | @bottom-right-corner | @left-top | @left-middle | @left-bottom | @right-top | @right-middle | @right-bottom
+39
+<pseudo-page>+ | <ident> <pseudo-page>*
+21
+[ <page-selector># ]?
+66
+A5 | A4 | A3 | B5 | B4 | JIS-B5 | JIS-B4 | letter | legal | ledger
+72
+none | <color> | <url> [none | <color>]? | context-fill | context-stroke
+38
+paint( <ident>, <declaration-value>? )
+36
+<visual-box> | fill-box | stroke-box
+14
+<dashed-ident>
+142
+palette-mix(<color-interpolation-method> , [ [normal | light | dark | <palette-identifier> | <palette-mix()> ] && <percentage [0,100]>? ]#{2})
+33
+path( <'fill-rule'>? , <string> )
+42
+perspective( [ <length [0,∞]> | none ] )
+23
+hsl | hwb | lch | oklch
+72
+polygon( <'fill-rule'>? , [ <length-percentage> <length-percentage> ]# )
+244
+[ [ left | center | right ] || [ top | center | bottom ] | [ left | center | right | <length-percentage> ] [ top | center | bottom | <length-percentage> ]? | [ [ left | right ] <length-percentage> ] && [ [ top | bottom ] <length-percentage> ] ]
+898
+[ left | center | right | span-left | span-right | x-start | x-end | span-x-start | span-x-end | x-self-start | x-self-end | span-x-self-start | span-x-self-end | span-all ] || [ top | center | bottom | span-top | span-bottom | y-start | y-end | span-y-start | span-y-end | y-self-start | y-self-end | span-y-self-start | span-y-self-end | span-all ] | [ block-start | center | block-end | span-block-start | span-block-end | span-all ] || [ inline-start | center | inline-end | span-inline-start | span-inline-end | span-all ] | [ self-block-start | center | self-block-end | span-self-block-start | span-self-block-end | span-all ] || [ self-inline-start | center | self-inline-end | span-self-inline-start | span-self-inline-end | span-all ] | [ start | center | end | span-start | span-end | span-all ]{1,2} | [ self-start | center | self-end | span-self-start | span-self-end | span-all ]{1,2}
+29
+pow( <calc-sum>, <calc-sum> )
+66
+srgb | srgb-linear | display-p3 | a98-rgb | prophoto-rgb | rec2020
+54
+<predefined-rgb> [ <number> | <percentage> | none ]{3}
+56
+':' <ident-token> | ':' <function-token> <any-value> ')'
+27
+':' <pseudo-class-selector>
+34
+: [ left | right | first | blank ]
+57
+open-quote | close-quote | no-open-quote | no-close-quote
+87
+radial-gradient( [ <ending-shape> || <size> ]? [ at <position> ]? , <color-stop-list> )
+40
+<number [0,∞]> [ / <number [0,∞]> ]?
+61
+ray( <angle> && <ray-size>? && contain? && [at <position>]? )
+71
+closest-side | closest-corner | farthest-side | farthest-corner | sides
+106
+srgb | srgb-linear | display-p3 | a98-rgb | prophoto-rgb | rec2020 | lab | oklab | xyz | xyz-d50 | xyz-d65
+32
+<combinator>? <complex-selector>
+20
+<relative-selector>#
+16
+larger | smaller
+29
+rem( <calc-sum>, <calc-sum> )
+65
+repeat-x | repeat-y | [ repeat | space | round | no-repeat ]{1,2}
+91
+repeating-conic-gradient( [ from <angle> ]? [ at <position> ]?, <angular-color-stop-list> )
+83
+repeating-linear-gradient( [ <angle> | to <side-or-corner> ]? , <color-stop-list> )
+97
+repeating-radial-gradient( [ <ending-shape> || <size> ]? [ at <position> ]? , <color-stop-list> )
+26
+reversed( <counter-name> )
+167
+rgb( <percentage>{3} [ / <alpha-value> ]? ) | rgb( <number>{3} [ / <alpha-value> ]? ) | rgb( <percentage>#{3} , <alpha-value>? ) | rgb( <number>#{3} , <alpha-value>? )
+171
+rgba( <percentage>{3} [ / <alpha-value> ]? ) | rgba( <number>{3} [ / <alpha-value> ]? ) | rgba( <percentage>#{3} , <alpha-value>? ) | rgba( <number>#{3} , <alpha-value>? )
+30
+rotate( [ <angle> | <zero> ] )
+65
+rotate3d( <number> , <number> , <number> , [ <angle> | <zero> ] )
+31
+rotateX( [ <angle> | <zero> ] )
+31
+rotateY( [ <angle> | <zero> ] )
+31
+rotateZ( [ <angle> | <zero> ] )
+53
+round( <rounding-strategy>?, <calc-sum>, <calc-sum> )
+29
+nearest | up | down | to-zero
+40
+saturate( [ <number> | <percentage> ]? )
+42
+scale( [ <number> | <percentage> ]#{1,2} )
+42
+scale3d( [ <number> | <percentage> ]#{3} )
+37
+scaleX( [ <number> | <percentage> ] )
+37
+scaleY( [ <number> | <percentage> ] )
+37
+scaleZ( [ <number> | <percentage> ] )
+15
+<selector-list>
+15
+<selector-list>
+35
+scroll( [ <scroller> || <axis> ]? )
+21
+root | nearest | self
+23
+<complex-selector-list>
+68
+center | start | end | self-start | self-end | flex-start | flex-end
+37
+sepia( [ <number> | <percentage> ]? )
+35
+inset? && <length>{2,4} && <color>?
+29
+[ <length>{2,3} && <color>? ]
+38
+rect(<top>, <right>, <bottom>, <left>)
+25
+<visual-box> | margin-box
+50
+<length-percentage> | closest-side | farthest-side
+36
+[ left | right ] || [ top | bottom ]
+18
+sign( <calc-sum> )
+17
+sin( <calc-sum> )
+263
+<'animation-duration'> || <easing-function> || <'animation-delay'> || <single-animation-iteration-count> || <single-animation-direction> || <single-animation-fill-mode> || <single-animation-play-state> || [ none | <keyframes-name> ] || <single-animation-timeline>
+26
+replace | add | accumulate
+48
+normal | reverse | alternate | alternate-reverse
+34
+none | forwards | backwards | both
+19
+infinite | <number>
+16
+running | paused
+52
+auto | none | <dashed-ident> | <scroll()> | <view()>
+111
+[ none | <single-transition-property> ] || <time> || <easing-function> || <time> || <transition-behavior-value>
+20
+all | <custom-ident>
+99
+closest-side | farthest-side | closest-corner | farthest-corner | <length> | <length-percentage>{2}
+52
+skew( [ <angle> | <zero> ] , [ <angle> | <zero> ]? )
+29
+skewX( [ <angle> | <zero> ] )
+29
+skewY( [ <angle> | <zero> ] )
+18
+sqrt( <calc-sum> )
+59
+jump-start | jump-end | jump-none | jump-both | start | end
+60
+step-start | step-end | steps(<integer>[, <step-position>]?)
+81
+<id-selector> | <class-selector> | <attribute-selector> | <pseudo-class-selector>
+129
+not <supports-in-parens> | <supports-in-parens> [ and <supports-in-parens> ]* | <supports-in-parens> [ or <supports-in-parens> ]*
+17
+( <declaration> )
+40
+<supports-decl> | <supports-selector-fn>
+66
+( <supports-condition> ) | <supports-feature> | <general-enclosed>
+30
+selector( <complex-selector> )
+35
+<string> | <image> | <custom-ident>
+241
+AccentColor | AccentColorText | ActiveText | ButtonBorder | ButtonFace | ButtonText | Canvas | CanvasText | Field | FieldText | GrayText | Highlight | HighlightText | LinkText | Mark | MarkText | SelectedItem | SelectedItemText | VisitedText
+17
+tan( <calc-sum> )
+58
+<target-counter()> | <target-counters()> | <target-text()>
+74
+target-counter( [ <string> | <url> ] , <custom-ident> , <counter-style>? )
+86
+target-counters( [ <string> | <url> ] , <custom-ident> , <string> , <counter-style>? )
+82
+target-text( [ <string> | <url> ] , [ content | before | after | first-letter ]? )
+106
+[ text | cap | ex | ideographic | ideographic-ink ] [ text | alphabetic | ideographic | ideographic-ink ]?
+21
+<time> | <percentage>
+63
+cover | contain | entry | exit | entry-crossing | exit-crossing
+63
+<length-percentage> | <flex> | min-content | max-content | auto
+66
+[ <line-names>? [ <track-size> | <track-repeat> ] ]+ <line-names>?
+79
+repeat( [ <integer [1,∞]> ] , [ <line-names>? <track-size> ]+ <line-names>? )
+103
+<track-breadth> | minmax( <inflexible-breadth> , <track-breadth> ) | fit-content( <length-percentage> )
+298
+<matrix()> | <translate()> | <translateX()> | <translateY()> | <scale()> | <scaleX()> | <scaleY()> | <rotate()> | <skew()> | <skewX()> | <skewY()> | <matrix3d()> | <translate3d()> | <translateZ()> | <scale3d()> | <scaleZ()> | <rotate3d()> | <rotateX()> | <rotateY()> | <rotateZ()> | <perspective()>
+21
+<transform-function>+
+23
+normal | allow-discrete
+55
+translate( <length-percentage> , <length-percentage>? )
+67
+translate3d( <length-percentage> , <length-percentage> , <length> )
+33
+translateX( <length-percentage> )
+33
+translateY( <length-percentage> )
+22
+translateZ( <length> )
+61
+most-width | most-height | most-block-size | most-inline-size
+39
+flip-block || flip-inline || flip-start
+236
+string | color | url | integer | number | length | angle | time | frequency | cap | ch | em | ex | ic | lh | rlh | rem | vb | vi | vw | vh | vmin | vmax | mm | Q | cm | in | pt | pc | px | deg | grad | rad | turn | ms | s | Hz | kHz | %
+28
+<wq-name> | <ns-prefix>? '*'
+52
+var( <custom-property-name> , <declaration-value>? )
+42
+view([<axis> || <'view-timeline-inset'>]?)
+26
+auto | <length-percentage>
+38
+content-box | padding-box | border-box
+26
+<ns-prefix>? <ident-token>
+23
+xyz | xyz-d50 | xyz-d65
+43
+<xyz> [ <number> | <percentage> | none ]{3}

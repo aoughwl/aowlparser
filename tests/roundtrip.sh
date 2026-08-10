@@ -114,6 +114,10 @@ for f in "$HERE"/js/corpus/*.js; do
   check_one "$f" "$(basename "$f")" js
 done
 
+echo "vds-parsed:"
+# vds corpus is length-prefixed records, not one file per grammar -- checked by
+# tests/vds/tgate.nim rather than the CLI loop here.
+
 echo "json-parsed:"
 for f in "$HERE"/json/corpus/*.json; do
   [ -e "$f" ] || continue

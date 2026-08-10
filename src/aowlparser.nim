@@ -4,7 +4,7 @@
 ##
 ## CLI (mirrors nifler):
 ##   aowlparser p <in.nim> [out.p.aif]     parse a Nim file, produce a AIF file
-##   aowlparser css|html|py|js|json <in> [out]  parse a dialect to AIF
+##   aowlparser css|html|py|js|json|vds <in> [out]  parse a dialect to AIF
 ##   aowlparser complete <in.nim>          finished, or still being typed?
 ##                                         exit 0 complete / 2 incomplete / 1 invalid
 ##   aowlparser render <in.aif> [out]      AIF back to source (inverse of the above)
@@ -19,7 +19,7 @@
 import std/[syncio, os]
 import nifbuilder
 import tokens, lexer, parser
-import aifread, cssparser, htmlparser, pyparser, jsparser, jsonparser
+import aifread, cssparser, htmlparser, pyparser, jsparser, jsonparser, vdsparser
 import completeness
 
 type
@@ -1681,8 +1681,8 @@ proc main() =
   let action = params[0]
   if action != "p" and action != "parse" and action != "check" and
      action != "css" and action != "html" and action != "py" and
-     action != "js" and action != "json" and action != "render" and
-     action != "complete":
+     action != "js" and action != "json" and action != "vds" and
+     action != "render" and action != "complete":
     write stderr, "unknown command: " & action & "\n"
     usage()
   # Positional args after the action: [input] [output]. `-` at either slot means
@@ -1762,6 +1762,8 @@ proc main() =
       text = renderJs(src)
     elif dialect == "json-parsed":
       text = renderJson(src)
+    elif dialect == "vds-parsed":
+      text = renderVds(src)
     else:
       write stderr, "cannot render dialect: " &
         (if dialect.len > 0: dialect else: "<none>") & "\n"
@@ -1777,7 +1779,7 @@ proc main() =
     quit 0
 
   if action == "css" or action == "html" or action == "py" or
-     action == "js" or action == "json":
+     action == "js" or action == "json" or action == "vds":
     var docDiags: seq[Diagnostic] = @[]
     var aif = ""
     case action
@@ -1785,6 +1787,7 @@ proc main() =
     of "html": aif = htmlToAif(src, docDiags)
     of "py": aif = pyToAif(src, docDiags)
     of "json": aif = jsonToAif(src, docDiags)
+    of "vds": aif = vdsToAif(src, docDiags)
     else: aif = jsToAif(src, docDiags)
     if diagFmt != dfOff and docDiags.len > 0:
       renderDiags(docDiags, fileField, diagFmt, stderr)
