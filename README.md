@@ -86,3 +86,39 @@ aowlparser p --diagnostics:json in.nim out.p.aif   # structured diagnostics for 
 ```
 
 Everything is off by default, so a plain run is byte-compatible with `nifler`.
+
+## Document dialects: CSS
+
+Beyond Nim, aowlparser ingests document formats into AIF. The first is CSS, as the
+`css-parsed` dialect (`spec/css-dialect.md`):
+
+```sh
+aowlparser css in.css out.css.aif        # CSS -> css-parsed AIF
+aowlparser render out.css.aif            # AIF -> CSS source (inverse of the above)
+```
+
+`render` is the first **reader** side this repo has had — the Nim front end is
+one-way — and it dispatches on the `.dialect` header, not the file extension.
+
+**The acceptance criterion is byte-exactness, not structural equivalence.** The Nim
+front end is checked differentially against native `nifler`; CSS has no such oracle,
+so the gate is the round-trip itself:
+
+```sh
+tests/roundtrip.sh     # css -> aif -> render -> cmp, must be byte-identical
+```
+
+Currently **543,847 bytes byte-exact** across bootstrap (both the 221KB and 281KB
+builds) and the doxygen/mimalloc stylesheets, plus ~350 truncation-fuzz cases.
+
+Two design rules make that reachable, and both are the opposite of what the Nim
+dialect does:
+
+- **Leaves carry raw lexemes.** Nothing is decoded, unescaped, or case-folded.
+  `COLOR` stays `COLOR`, `.5` does not become `0.5`, `'x'` keeps its quote.
+- **No punctuation is implied.** `(lbrace)`, `(rbrace)`, `(colon)`, `(semi)` are
+  explicit nodes, so rendering emits no byte that was not in the source — and
+  malformed CSS round-trips too, rather than gaining braces it never had.
+
+Parsing never fails: unclassifiable spans become `(err (code …) (raw …))` holding the
+skipped bytes verbatim, and diagnostics land on the usual `--diagnostics:json` path.

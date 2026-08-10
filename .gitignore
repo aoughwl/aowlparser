@@ -1,5 +1,6 @@
 /bin/
 /nimcache/
+nimcache/
 /tests/_work/
 *.p.aif
 *.deps.aif

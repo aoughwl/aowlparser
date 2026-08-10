@@ -4,8 +4,11 @@
 ##
 ## CLI (mirrors nifler):
 ##   aowlparser p <in.nim> [out.p.aif]     parse a Nim file, produce a AIF file
+##   aowlparser css <in.css> [out.css.aif] parse CSS into the `css-parsed` dialect
+##   aowlparser render <in.aif> [out]      AIF back to source (inverse of `css`)
 ##
-## When the output path is omitted it defaults to `<in>.p.aif`.
+## When the output path is omitted it defaults to `<in>.p.aif` (`<in>.css.aif` for
+## `css`). `render` writes to stdout unless given an output path.
 ##
 ## This driver is intentionally a thin, top-level-init entry point with only
 ## file/stdout I/O so the same code path can later back a globalThis-driven JS
@@ -14,6 +17,7 @@
 import std/[syncio, os]
 import nifbuilder
 import tokens, lexer, parser
+import aifread, cssparser
 
 type
   DiagFormat = enum dfText, dfJson, dfOff
@@ -1672,7 +1676,8 @@ proc main() =
   if params.len < 1:
     usage()
   let action = params[0]
-  if action != "p" and action != "parse" and action != "check":
+  if action != "p" and action != "parse" and action != "check" and
+     action != "css" and action != "render":
     write stderr, "unknown command: " & action & "\n"
     usage()
   # Positional args after the action: [input] [output]. `-` at either slot means
@@ -1717,6 +1722,54 @@ proc main() =
   # `check` is lint-only: diagnostics to stdout, no AIF, exit 1 on any error.
   if action == "check":
     quit runCheck(src, fileField, opts, diagFmt, curly, maxDepth)
+
+  # --- document dialects -----------------------------------------------------
+  # `render` is the INVERSE of `css` (and, later, `html`): AIF back to source. It
+  # dispatches on the `.dialect` header rather than the file extension, so a
+  # renamed artifact still renders correctly — and an unknown dialect is an error
+  # rather than a silently empty file.
+  if action == "render":
+    let dialect = dialectOf(src)
+    var text = ""
+    if dialect == "css-parsed":
+      text = renderCss(src)
+    else:
+      write stderr, "cannot render dialect: " &
+        (if dialect.len > 0: dialect else: "<none>") & "\n"
+      quit 1
+    if useStdout or outputArg == "" or outputArg == "-":
+      write stdout, text
+    else:
+      try:
+        writeFile(outputArg, text)
+      except:
+        write stderr, "cannot write file: " & outputArg & "\n"
+        quit 1
+    quit 0
+
+  if action == "css":
+    var cssDiags: seq[Diagnostic] = @[]
+    let aif = cssToAif(src, cssDiags)
+    if diagFmt != dfOff and cssDiags.len > 0:
+      renderDiags(cssDiags, fileField, diagFmt, stderr)
+    var target = ""
+    if not useStdout:
+      if outputArg != "" and outputArg != "-":
+        target = outputArg
+      else:
+        target = inputArg & ".css.aif"
+    if target == "":
+      write stdout, aif
+    else:
+      try:
+        writeFile(target, aif)
+      except:
+        write stderr, "cannot write file: " & target & "\n"
+        quit 1
+    if strict:
+      for d in cssDiags:
+        if d.severity == sevError: quit 1
+    quit 0
   # Resolve the output target.
   var outp = ""
   if not useStdout:
