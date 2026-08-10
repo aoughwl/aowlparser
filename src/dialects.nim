@@ -9,7 +9,8 @@
 
 import tokens
 import aowlparse/nodespec
-import cssparser, htmlparser, pyparser, jsparser, jsonparser, vdsparser
+import cssparser, htmlparser, pyparser, jsparser, jsonparser, vdsparser,
+       mdparser
 
 type
   DialectEntry* = object
@@ -38,6 +39,7 @@ proc pPy(src: string; diags: var seq[Diagnostic]): string = pyToAif(src, diags)
 proc pJs(src: string; diags: var seq[Diagnostic]): string = jsToAif(src, diags)
 proc pJson(src: string; diags: var seq[Diagnostic]): string = jsonToAif(src, diags)
 proc pVds(src: string; diags: var seq[Diagnostic]): string = vdsToAif(src, diags)
+proc pMd(src: string; diags: var seq[Diagnostic]): string = mdToAif(src, diags)
 
 proc allDialects*(): seq[DialectEntry] =
   result = @[
@@ -61,6 +63,10 @@ proc allDialects*(): seq[DialectEntry] =
     DialectEntry(name: "vds-parsed", command: "vds", exts: @[".vds"],
       summary: "MDN value-definition syntax (the language CSS specs use)",
       parse: pVds, render: renderVds),
+    DialectEntry(name: "md-parsed", command: "md",
+      exts: @[".md", ".markdown"],
+      summary: "Markdown block structure; fenced code is not markup",
+      parse: pMd, render: renderMd),
   ]
 
 proc specOf*(cmd: string): Dialect =
@@ -78,6 +84,7 @@ proc specOf*(cmd: string): Dialect =
   of "js": jsDialect()
   of "json": jsonDialect()
   of "vds": vdsDialect()
+  of "md": mdDialect()
   else: Dialect(name: "", nodes: @[])
 
 proc byCommand*(cmd: string): int =

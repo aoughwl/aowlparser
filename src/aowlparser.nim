@@ -4,7 +4,7 @@
 ##
 ## CLI (mirrors nifler):
 ##   aowlparser p <in.nim> [out.p.aif]     parse a Nim file, produce a AIF file
-##   aowlparser css|html|py|js|json|vds <in> [out]  parse a dialect to AIF
+##   aowlparser css|html|py|js|json|vds|md <in> [out]  parse a dialect to AIF
 ##   aowlparser auto <in> [out]            pick the dialect by file extension
 ##   aowlparser dialects                   list every dialect and its node counts
 ##   aowlparser complete <in.nim>          finished, or still being typed?
@@ -22,6 +22,7 @@ import std/[syncio, os]
 import nifbuilder
 import tokens, lexer, parser
 import aifread, cssparser, htmlparser, pyparser, jsparser, jsonparser, vdsparser
+import mdparser
 import completeness
 import dialects
 import aowlparse/nodespec
@@ -1686,6 +1687,7 @@ proc main() =
   if action != "p" and action != "parse" and action != "check" and
      action != "css" and action != "html" and action != "py" and
      action != "js" and action != "json" and action != "vds" and
+     action != "md" and
      action != "render" and action != "complete" and action != "auto" and
      action != "dialects":
     write stderr, "unknown command: " & action & "\n"
@@ -1820,6 +1822,8 @@ proc main() =
       text = renderJson(src)
     elif dialect == "vds-parsed":
       text = renderVds(src)
+    elif dialect == "md-parsed":
+      text = renderMd(src)
     else:
       write stderr, "cannot render dialect: " &
         (if dialect.len > 0: dialect else: "<none>") & "\n"
@@ -1835,7 +1839,8 @@ proc main() =
     quit 0
 
   if effAction == "css" or effAction == "html" or effAction == "py" or
-     effAction == "js" or effAction == "json" or effAction == "vds":
+     effAction == "js" or effAction == "json" or effAction == "vds" or
+     effAction == "md":
     var docDiags: seq[Diagnostic] = @[]
     var aif = ""
     case effAction
@@ -1844,6 +1849,7 @@ proc main() =
     of "py": aif = pyToAif(src, docDiags)
     of "json": aif = jsonToAif(src, docDiags)
     of "vds": aif = vdsToAif(src, docDiags)
+    of "md": aif = mdToAif(src, docDiags)
     else: aif = jsToAif(src, docDiags)
     if diagFmt != dfOff and docDiags.len > 0:
       renderDiags(docDiags, fileField, diagFmt, stderr)

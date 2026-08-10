@@ -95,6 +95,7 @@ check "py"               "$HERE/py/tgate.nim"
 check "js"               "$HERE/js/tgate.nim"
 check "json"             "$HERE/json/tgate.nim"
 check "vds"              "$HERE/vds/tgate.nim" corpus/mdn.vdscorpus
+check "md"               "$HERE/md/tgate.nim"
 check "completeness"     "$HERE/tcompleteness.nim"
 
 echo "=== CLI round-trip (all dialects, real corpora) ==="

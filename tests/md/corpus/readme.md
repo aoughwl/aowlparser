@@ -156,20 +156,11 @@ Each is a first-class parser, not a demo. All are byte-exact on real corpora:
 | dialect | command | validated on |
 |---|---|---|
 | `nim-parsed` | `aowlparser p` | 172/172 corpus + full Nim stdlib, vs the `nifler` oracle |
-| `css-parsed` | `aowlparser css` | bootstrap x2 + doxygen suite, 543KB |
+| `css-parsed` | `aowlparser css` | bootstrap ×2 + doxygen suite, 543KB |
 | `html-parsed` | `aowlparser html` | 150 diverse real pages |
 | `py-parsed` | `aowlparser py` | **all 2,885 `.py` on this machine**, 8s |
 | `js-parsed` | `aowlparser js` | **11,556 `.js`, 557MB**, 100s |
-| `json-parsed` | `aowlparser json` | **all 4,326 `.json`**, 8s |
-| `vds-parsed` | `aowlparser vds` | **1,224 MDN grammar strings** (the language CSS specs use) |
-| `md-parsed` | `aowlparser md` | **all 5,920 `.md`**, 6s |
-
-```sh
-aowlparser auto file.py      # pick the dialect from the extension
-aowlparser dialects          # list every dialect and its node vocabulary
-tests/run.sh                 # THE gate: every dialect, the CLI, robustness,
-                             # and the Nim differential, in one command
-```
+| `json-parsed` | `aowlparser json` | **4,326 `.json`**, 8s |
 
 `src/jsonparser.nim` is the economy check: declaration, tokenizer, parser,
 renderer and all, in **one short file**, because everything except the JSON
