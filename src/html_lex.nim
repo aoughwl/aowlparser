@@ -41,12 +41,6 @@ const
                    "link", "meta", "param", "source", "track", "wbr"]
   RawTextElements* = ["script", "style", "textarea", "title"]
 
-proc lowerAscii(s: string): string =
-  result = ""
-  for c in s.items:
-    if c >= 'A' and c <= 'Z': result.add char(int(c) + 32)
-    else: result.add c
-
 proc isVoidElement*(name: string): bool =
   let n = lowerAscii(name)
   for v in VoidElements:
