@@ -21,6 +21,7 @@
 #   EXTRA_CSS   extra CSS paths to include, space-separated. Defaults to the
 #               bootstrap.css in aoughwl-css when present — 280KB of real-world
 #               CSS that is deliberately NOT vendored into this repo.
+#   EXTRA_HTML  extra HTML paths to include, space-separated.
 
 set -u
 
@@ -89,6 +90,16 @@ done
 for f in $EXTRA_CSS; do
   [ -e "$f" ] || continue
   check_one "$f" "$(basename "$f") (external)" css
+done
+
+echo "html-parsed:"
+for f in "$HERE"/html/corpus/*.html; do
+  [ -e "$f" ] || continue
+  check_one "$f" "$(basename "$f")" html
+done
+for f in ${EXTRA_HTML:-}; do
+  [ -e "$f" ] || continue
+  check_one "$f" "$(basename "$f") (external)" html
 done
 
 echo "--------------------------------------------------------------"

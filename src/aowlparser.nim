@@ -5,7 +5,8 @@
 ## CLI (mirrors nifler):
 ##   aowlparser p <in.nim> [out.p.aif]     parse a Nim file, produce a AIF file
 ##   aowlparser css <in.css> [out.css.aif] parse CSS into the `css-parsed` dialect
-##   aowlparser render <in.aif> [out]      AIF back to source (inverse of `css`)
+##   aowlparser html <in.html> [out.html.aif]  parse HTML into `html-parsed`
+##   aowlparser render <in.aif> [out]      AIF back to source (inverse of the above)
 ##
 ## When the output path is omitted it defaults to `<in>.p.aif` (`<in>.css.aif` for
 ## `css`). `render` writes to stdout unless given an output path.
@@ -17,7 +18,7 @@
 import std/[syncio, os]
 import nifbuilder
 import tokens, lexer, parser
-import aifread, cssparser
+import aifread, cssparser, htmlparser
 
 type
   DiagFormat = enum dfText, dfJson, dfOff
@@ -1677,7 +1678,7 @@ proc main() =
     usage()
   let action = params[0]
   if action != "p" and action != "parse" and action != "check" and
-     action != "css" and action != "render":
+     action != "css" and action != "html" and action != "render":
     write stderr, "unknown command: " & action & "\n"
     usage()
   # Positional args after the action: [input] [output]. `-` at either slot means
@@ -1733,6 +1734,8 @@ proc main() =
     var text = ""
     if dialect == "css-parsed":
       text = renderCss(src)
+    elif dialect == "html-parsed":
+      text = renderHtml(src)
     else:
       write stderr, "cannot render dialect: " &
         (if dialect.len > 0: dialect else: "<none>") & "\n"
@@ -1747,17 +1750,18 @@ proc main() =
         quit 1
     quit 0
 
-  if action == "css":
-    var cssDiags: seq[Diagnostic] = @[]
-    let aif = cssToAif(src, cssDiags)
-    if diagFmt != dfOff and cssDiags.len > 0:
-      renderDiags(cssDiags, fileField, diagFmt, stderr)
+  if action == "css" or action == "html":
+    var docDiags: seq[Diagnostic] = @[]
+    let aif = if action == "css": cssToAif(src, docDiags)
+              else: htmlToAif(src, docDiags)
+    if diagFmt != dfOff and docDiags.len > 0:
+      renderDiags(docDiags, fileField, diagFmt, stderr)
     var target = ""
     if not useStdout:
       if outputArg != "" and outputArg != "-":
         target = outputArg
       else:
-        target = inputArg & ".css.aif"
+        target = inputArg & "." & action & ".aif"
     if target == "":
       write stdout, aif
     else:
@@ -1767,7 +1771,7 @@ proc main() =
         write stderr, "cannot write file: " & target & "\n"
         quit 1
     if strict:
-      for d in cssDiags:
+      for d in docDiags:
         if d.severity == sevError: quit 1
     quit 0
   # Resolve the output target.

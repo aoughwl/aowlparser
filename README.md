@@ -122,3 +122,35 @@ dialect does:
 
 Parsing never fails: unclassifiable spans become `(err (code …) (raw …))` holding the
 skipped bytes verbatim, and diagnostics land on the usual `--diagnostics:json` path.
+
+## Document dialects: HTML
+
+```sh
+aowlparser html in.html out.html.aif     # HTML -> html-parsed AIF
+aowlparser render out.html.aif           # AIF -> HTML source
+```
+
+Same two rules as CSS (`spec/html-dialect.md`). The tokenizer is mode-switching:
+`<script>`, `<style>`, `<textarea>` and `<title>` content is scanned as raw text, so a
+`<div>` inside a JavaScript string is never mistaken for a tag.
+
+Validated on **150 diverse real-world pages** (doxygen, Nim docgen, npm docs, mark.js
+fixtures) — all byte-exact, plus truncation fuzzing.
+
+**Nesting is best-effort; bytes are not.** This is not a full WHATWG insertion-mode
+implementation: it keeps an open-element stack, knows the void and raw-text elements,
+closes to a match, and emits an unmatched end tag as a stray `(etag)`. Pathological
+input may nest differently from a browser. Every token is still recorded, so
+round-trip is exact regardless.
+
+### Why there are two gates, not one
+
+`tests/roundtrip.sh` proves the renderer inverts the parser — and **nothing about
+whether the tree is correct**, because a token's bytes survive no matter which node
+they land in. Measured, not assumed: disabling raw-text mode entirely left the
+round-trip gate at 44/44 PASS with `<script>` content parsed as markup.
+
+So `tests/html/tstructure.nim` asserts *shape* — node counts by kind and nesting
+depth — and every assertion in it is one a byte-comparison is blind to. It found a
+real bug on its first run (`</script>` left raw-text mode without entering tag mode,
+so the end-tag parser ate the rest of the document as opaque leaves, byte-exactly).
