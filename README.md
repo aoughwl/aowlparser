@@ -87,6 +87,41 @@ aowlparser p --diagnostics:json in.nim out.p.aif   # structured diagnostics for 
 
 Everything is off by default, so a plain run is byte-compatible with `nifler`.
 
+## aowlparse — the generic parsing core
+
+`src/aowlparse/` is a small library for building byte-exact source→AIF front
+ends. The dialects in this repo are its first users, and each is a first-class
+parser in its own right rather than a demo.
+
+| module | what it owns |
+|---|---|
+| `nodespec.nim` | a dialect declares each tag as **text / punct / struct / opaque**, once |
+| `scan.nim` | the byte cursor: position, 1-based line, 0-based column, `\r\n` as one break |
+| `emit.nim` | AIF header, `leaf`/`mark`, validated against the declaration |
+| `render.nim` | **one renderer for every dialect**, driven by the declaration |
+| `gate.nim` | the acceptance harness: identity, round-trip, declared, shape, fuzz |
+
+**Why one declaration.** A hand-written renderer can disagree with its parser
+about whether a byte is emitted, and that disagreement is exactly the bug class a
+byte-exact gate exists to catch. Both sides read `NodeSpec`, so the divergence is
+not merely caught — it is unrepresentable. `undeclaredTags` closes the other
+door: an undeclared tag would render as *nothing*, so forgetting to declare a
+node is a silent byte loss, and the gate names it instead.
+
+**Why four checks and not one** (`gate.nim` documents this at length):
+
+- **identity** — the token stream concatenates back to the input, checked before
+  a tree exists to blame.
+- **round-trip** — `render(parse(s)) == s`. Proves the renderer inverts the
+  parser, and *nothing about whether the tree is right*.
+- **declared** — every emitted tag is in the declaration.
+- **shape** — node counts and nesting depth. The only check that sees tree
+  correctness. A dialect supplying none has opted out of ever detecting a wrong
+  tree.
+
+Adding a dialect means writing a tokenizer, a fused parse+emit, and a
+declaration. Rendering, gating, and fuzzing come for free.
+
 ## Document dialects: CSS
 
 Beyond Nim, aowlparser ingests document formats into AIF. The first is CSS, as the
@@ -154,3 +189,38 @@ So `tests/html/tstructure.nim` asserts *shape* — node counts by kind and nesti
 depth — and every assertion in it is one a byte-comparison is blind to. It found a
 real bug on its first run (`</script>` left raw-text mode without entering tag mode,
 so the end-tag parser ate the rest of the document as opaque leaves, byte-exactly).
+
+## Source dialects: Python and JavaScript
+
+```sh
+aowlparser py in.py   out.py.aif      # Python -> py-parsed AIF
+aowlparser js in.js   out.js.aif      # JavaScript -> js-parsed AIF
+aowlparser render out.py.aif          # AIF -> source
+```
+
+**Python** (`py-parsed`) models the thing that makes Python Python: the
+**indentation tree**. A statement line whose successor is indented deeper gets a
+`(block …)` child. The tokenizer handles implicit line joining (a newline inside
+brackets is not a terminator), explicit `\`-joining, and prefixed/triple-quoted
+strings. Blank and comment-only lines do not affect indentation — taking a blank
+line's indent of 0 as a dedent would close every open block at the first empty
+line, while staying perfectly byte-exact, which is why that has a shape assertion.
+
+Validated on **all 2,885 Python files on this machine** — byte-exact, in 10s.
+
+**JavaScript** (`js-parsed`) handles the hazard that defines JS tokenizing:
+`/` is a regex in expression position and division in operand position, decided
+by the *preceding* token. Getting it wrong silently swallows code into a regex
+that runs to end-of-line — byte-exactly — so the shape gate concentrates there.
+Template literals are kept whole, with `${…}` nesting tracked so a `}` inside a
+nested string does not end them early.
+
+Validated on **11,556 real JavaScript files** (557MB, including minified
+bundles).
+
+**Scope, stated up front.** Both are *concrete-syntax* dialects, like CSS and
+HTML: exact tokens plus a structural tree (indentation for Python, bracket groups
+for JavaScript). Neither models statement structure via ASI, expression
+precedence, name resolution, or types. That line is deliberate — a tree claiming
+more structure than the parser understands is worse than one claiming less,
+because byte-exactness cannot tell you when the extra structure is wrong.

@@ -113,10 +113,31 @@ proc expectNesting*(g: var Gate; label, src, tag: string; want: int) =
     fail(g, label, "expected (" & tag & ") nesting depth " & $want &
                    ", got " & $got)
 
-proc fuzzTruncations*(g: var Gate; label, src: string; step: int) =
+const
+  FuzzSamples* = 128        ## prefixes tried per file, REGARDLESS of file size
+  FuzzMaxBytes* = 262144    ## files larger than this are not fuzzed
+
+proc fuzzTruncations*(g: var Gate; label, src: string) =
   ## Every prefix must round-trip: a severed comment, a half-written token, an
   ## unclosed block. This is the cheapest way to reach the recovery paths.
+  ##
+  ## THE WORK IS BOUNDED BY WORK, NOT BY STEPS. Fuzzing is inherently O(n^2) —
+  ## each of n/step prefixes is re-parsed from the start — so a fixed byte
+  ## `step` makes cost explode with file size. Measured: a 25.8MB minified
+  ## bundle at step 397 is ~63,000 prefixes averaging 12.5MB, which killed a
+  ## whole-corpus sweep at the 560s deadline while 300 ordinary files took 5.3s.
+  ##
+  ## So: a fixed SAMPLE COUNT (step scales with the file), and a hard size cap
+  ## above which the file is skipped — and the skip is PRINTED, never silent. A
+  ## harness that quietly drops the hardest inputs reads exactly like one that
+  ## passed them.
   g.checked = g.checked + 1
+  if src.len > FuzzMaxBytes:
+    echo "  skip fuzz: ", label, " (", src.len, " bytes > ", FuzzMaxBytes,
+         " cap; round-trip still checked)"
+    return
+  var step = src.len div FuzzSamples
+  if step < 1: step = 1
   var n = 0
   var bad = 0
   var firstBad = -1

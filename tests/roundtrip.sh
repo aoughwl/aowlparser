@@ -102,6 +102,18 @@ for f in ${EXTRA_HTML:-}; do
   check_one "$f" "$(basename "$f") (external)" html
 done
 
+echo "py-parsed:"
+for f in "$HERE"/py/corpus/*.py; do
+  [ -e "$f" ] || continue
+  check_one "$f" "$(basename "$f")" py
+done
+
+echo "js-parsed:"
+for f in "$HERE"/js/corpus/*.js; do
+  [ -e "$f" ] || continue
+  check_one "$f" "$(basename "$f")" js
+done
+
 echo "--------------------------------------------------------------"
 echo "round-trip: $total files   PASS: $pass   FAIL: $fail   ($bytes bytes byte-exact)"
 if [ -n "$fails" ]; then
