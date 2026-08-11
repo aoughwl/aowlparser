@@ -125,6 +125,14 @@ expectCount(g, "two directives", "%TAG !m! !my-\n--- a\n...\n%TAG !m! !my-\n--- 
 roundTrip(g, "directive with comment", "%FOO bar # ignored\n---\n\"x\"\n")
 roundTrip(g, "lone document end", "...\n")
 roundTrip(g, "percent inside a document is content", "---\na: 100%\n")
+
+# A TAB separates a key from its value just as a space does. YAML bans tabs for
+# INDENTATION, a different rule, and conflating the two made these no mapping at
+# all — found by the suite oracle (6BCT, DC7X), invisible to the round-trip.
+expectCount(g, "tab after the colon still makes an entry", "a:\tb\n", "entry", 1)
+expectCount(g, "tab after a dash still makes an item", "-\tb\n", "item", 1)
+expectCount(g, "tab-separated entry inside an item", "- foo:\tbar\n", "entry", 1)
+roundTrip(g, "tab after the colon", "a:\tb\nseq:\t\n - a\t\nc: d\t#X\n")
 expectCount(g, "-1 is a value, not a marker", "a: -1\n", "item", 0)
 expectCount(g, "a url is one entry", "url: http://x/y\n", "entry", 1)
 

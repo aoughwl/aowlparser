@@ -183,7 +183,11 @@ proc findKeyColon(body: string; start: int): int =
     if c == '[' or c == '{': depth = depth + 1
     elif c == ']' or c == '}': depth = depth - 1
     elif c == ':' and depth == 0:
-      if i + 1 >= body.len or body[i+1] == ' ': return i
+      # A TAB separates just as well as a space. YAML forbids tabs for
+      # INDENTATION, which is a different rule, and conflating the two made
+      # `- foo:<TAB>bar` no mapping at all — caught by the suite's 6BCT/DC7X
+      # against the oracle, invisible to the round-trip.
+      if i + 1 >= body.len or body[i+1] == ' ' or body[i+1] == '\t': return i
     i = i + 1
   return -1
 
@@ -206,7 +210,7 @@ proc isSeqMarker(body: string; p: int): bool =
   ## `-` is a sequence marker only when a space or the line end follows it;
   ## `-1` and `-foo` are scalars.
   if p >= body.len or body[p] != '-': return false
-  return p + 1 >= body.len or body[p+1] == ' '
+  return p + 1 >= body.len or body[p+1] == ' ' or body[p+1] == '\t'
 
 proc isBlockScalarValue(v: string): bool =
   ## `|`, `>`, and their chomping/indentation indicators (`|-`, `>2`, `|+2`).
@@ -228,7 +232,7 @@ proc isDocStart(s: string): bool =
   let body = stripEol(s)
   if body.len < 3: return false
   if body[0] != '-' or body[1] != '-' or body[2] != '-': return false
-  return body.len == 3 or body[3] == ' '
+  return body.len == 3 or body[3] == ' ' or body[3] == '\t'
 
 proc isDirective(s: string): bool =
   ## `%YAML`/`%TAG` at column 0, BETWEEN documents. A directive is not content
@@ -242,7 +246,7 @@ proc isDocEnd(s: string): bool =
   let body = stripEol(s)
   if body.len < 3: return false
   if body[0] != '.' or body[1] != '.' or body[2] != '.': return false
-  return body.len == 3 or body[3] == ' '
+  return body.len == 3 or body[3] == ' ' or body[3] == '\t'
 
 # --- emitting ---------------------------------------------------------------
 
