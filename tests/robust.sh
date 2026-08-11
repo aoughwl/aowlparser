@@ -79,6 +79,19 @@ expect "jsonq malformed path" ""       2 jsonq "$J" 'tags[x]'
 expect "jsonq no path given" ""        2 jsonq "$J"
 expect "jsonlint accepts"    ""        0 jsonlint "$J"
 
+# (5) `auto` must dispatch the repo's OWN format. It did not: `auto x.nim`
+# answered "no dialect for x.nim" while `p x.nim` worked, because nim-parsed is
+# not a registry row. .nims and .nimble are NimScript too.
+printf 'proc f(x: int): int = x + 1\n' > "$WORK/src.txt"
+for ext in nim nims nimble; do
+  cp "$WORK/src.txt" "$WORK/auto.$ext"
+  if ! timeout -s KILL 5 "$NP" auto "$WORK/auto.$ext" /dev/null >/dev/null 2>&1; then
+    echo "FAIL: auto did not dispatch .$ext"
+    fail=1
+  fi
+done
+expect "auto still refuses an unknown extension" "" 1 auto "$WORK/auto.zzz"
+
 printf '{"a":1,}' > "$WORK/bad.json"
 expect "jsonlint rejects a trailing comma" "" 1 jsonlint "$WORK/bad.json"
 printf 'NaN' > "$WORK/nan.json"

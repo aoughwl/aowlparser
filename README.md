@@ -86,6 +86,7 @@ positive on valid code.
 
 ```sh
 aowlparser p in.nim out.p.aif           # parse Nim source -> nifler-compatible AIF
+aowlparser auto in.nims                  # dialect from the extension (.nim/.nims/.nimble too)
 aowlparser check in.nim                  # lint / report diagnostics, recovering past errors
 aowlparser p --diagnostics:json in.nim out.p.aif   # structured diagnostics for tooling
 ```

@@ -1775,14 +1775,19 @@ proc main() =
   # error listing what is known — never a silent fallthrough to some default.
   var effAction = action
   if action == "auto":
-    let idx = byExtension(inputArg)
-    if idx < 0:
-      write stderr, "no dialect for " &
-        (if inputArg.len > 0: inputArg else: "<stdin>") &
-        "  (known extensions: " & knownExtensions() & ")\n"
-      quit 1
-    let all = allDialects()
-    effAction = all[idx].command
+    # The nim front end first: it is not a registry row (see nimExtensions),
+    # and forgetting it here is what made `auto` fail on `.nim`.
+    if isNimExtension(inputArg):
+      effAction = "p"
+    else:
+      let idx = byExtension(inputArg)
+      if idx < 0:
+        write stderr, "no dialect for " &
+          (if inputArg.len > 0: inputArg else: "<stdin>") &
+          "  (known extensions: " & knownExtensions() & ")\n"
+        quit 1
+      let all = allDialects()
+      effAction = all[idx].command
 
   # --- the fast READER on the command line -----------------------------------
   # `json` (the dialect) keeps every byte so a document round-trips; `jsonq` and
@@ -1940,10 +1945,13 @@ proc main() =
   var outp = ""
   if not useStdout:
     if outputArg != "" and outputArg != "-":
+      # An explicit path is used VERBATIM. It used to gain a `.aif` suffix
+      # whenever it did not already end in one, which quietly turned
+      # `aowlparser p x.nim /dev/null` — the way every script discards output —
+      # into a write to `/dev/null.aif`, and any deliberate `out.p.nif` into
+      # `out.p.nif.aif`. The default name below still applies when no output is
+      # given at all, which is where the convenience belonged.
       outp = outputArg
-      let n = outp.len
-      if n < 4 or outp[n-4 .. n-1] != ".aif":
-        outp = outp & ".aif"
     elif useStdin:
       # No output path and reading stdin → default to stdout.
       useStdout = true

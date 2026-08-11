@@ -74,6 +74,49 @@ proc allDialects*(): seq[DialectEntry] =
       parse: pYaml, render: renderYaml),
   ]
 
+proc lowerExt(path: string): string =
+  ## The extension of `path`, lower-cased, including the dot. "" when there is
+  ## none, or when the dot belongs to a directory component.
+  var dot = -1
+  var i = path.len - 1
+  while i >= 0:
+    let c = path[i]
+    if c == '/': break
+    if c == '.' and dot < 0: dot = i
+    i = i - 1
+  if dot < 0: return ""
+  result = ""
+  var j = dot
+  while j < path.len:
+    let c = path[j]
+    if c >= 'A' and c <= 'Z': result.add char(int(c) + 32)
+    else: result.add c
+    j = j + 1
+
+proc nimExtensions*(): seq[string] =
+  ## The extensions the NIM front end owns.
+  ##
+  ## `nim-parsed` is not a row in the registry above: it predates it, its parse
+  ## takes options the document dialects have no equivalent for, and it has no
+  ## render side (it is one-way). But leaving it out of the table meant `auto`
+  ## could not dispatch the repo's OWN primary format — `aowlparser auto x.nim`
+  ## answered "no dialect for x.nim" while `aowlparser p x.nim` worked fine.
+  ##
+  ## `.nims` and `.nimble` are here because both are NimScript: every one of the
+  ## 400 `.nimble` files sampled on this machine is Nim source, not the old
+  ## `[Package]` ini format.
+  @[".nim", ".nims", ".nimble"]
+
+proc isNimExtension*(path: string): bool =
+  let ext = lowerExt(path)
+  if ext.len == 0: return false
+  # Bind to a local: nimony's borrow checker rejects iterating a proc RESULT
+  # directly, the same rule `knownExtensions` already documents below.
+  let exts = nimExtensions()
+  for e in exts.items:
+    if e == ext: return true
+  return false
+
 proc specOf*(cmd: string): Dialect =
   ## The node declaration for a dialect, looked up separately from the registry.
   ##
@@ -110,25 +153,6 @@ proc byDialectName*(name: string): int =
     i = i + 1
   return -1
 
-proc lowerExt(path: string): string =
-  ## The extension of `path`, lower-cased, including the dot. "" when there is
-  ## none, or when the dot belongs to a directory component.
-  var dot = -1
-  var i = path.len - 1
-  while i >= 0:
-    let c = path[i]
-    if c == '/': break
-    if c == '.' and dot < 0: dot = i
-    i = i - 1
-  if dot < 0: return ""
-  result = ""
-  var j = dot
-  while j < path.len:
-    let c = path[j]
-    if c >= 'A' and c <= 'Z': result.add char(int(c) + 32)
-    else: result.add c
-    j = j + 1
-
 proc byExtension*(path: string): int =
   ## Which dialect handles this file, by extension. -1 when none does.
   let ext = lowerExt(path)
@@ -144,6 +168,10 @@ proc byExtension*(path: string): int =
 
 proc knownExtensions*(): string =
   result = ""
+  let nimExts = nimExtensions()
+  for e in nimExts.items:
+    if result.len > 0: result.add " "
+    result.add e
   # Bind to a local first: nimony's borrow checker rejects iterating a proc
   # RESULT directly (`for d in allDialects()`), the same way it rejects
   # `for x in commandLineParams()`.
