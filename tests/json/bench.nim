@@ -42,8 +42,12 @@ var warm = parse(src)
 if not ok(warm):
   echo "REJECTED: ", warm.err, " at ", warm.errPos
   quit 1
-let values = warm.nodes.len
+let values = valueCount(warm)
 
+# Two numbers, because they answer different questions. A ONE-OFF parse
+# allocates and zeroes a fresh tape; a server parsing a stream of documents
+# reuses one parser and pays that once. simdjson reports the reused number and
+# so should we — alongside the cold one, so neither is hidden.
 var best = 0.0
 var it = 0
 while it < iterations:
@@ -57,9 +61,25 @@ while it < iterations:
   if best == 0.0 or dt < best: best = dt
   it = it + 1
 
+let reused = newJsonDoc()
+parseInto(reused, src)
+var bestReuse = 0.0
+it = 0
+while it < iterations:
+  let t0 = ticks(getMonoTime())
+  parseInto(reused, src)
+  let dt = float64(ticks(getMonoTime()) - t0) / 1_000_000_000.0
+  if not ok(reused):
+    echo "REJECTED mid-benchmark: ", reused.err
+    quit 1
+  if bestReuse == 0.0 or dt < bestReuse: bestReuse = dt
+  it = it + 1
+
 let mb = float64(src.len) / 1_048_576.0
 echo "jsonfast  ", args[0]
 echo "  bytes      ", src.len
 echo "  values     ", values
 echo "  best       ", best * 1000.0, " ms"
 echo "  throughput ", mb / best, " MB/s"
+echo "  reused     ", bestReuse * 1000.0, " ms"
+echo "  throughput-reused ", mb / bestReuse, " MB/s"

@@ -69,6 +69,7 @@ type
     ## accident is exactly the mistake a value type invites.
     src*: string
     nodes*: seq[JfNode]
+    count*: int       ## nodes actually used; `nodes` is a CAPACITY buffer
     err*: string      ## empty when the parse succeeded
     errPos*: int
 
@@ -176,22 +177,54 @@ proc matches(s: string; p: int; word: string): bool {.inline.} =
     k = k + 1
   return true
 
-proc parse*(src: string): JsonDoc =
-  ## One pass, one allocation growth curve, no recursion.
-  result = JsonDoc(src: src, nodes: @[], err: "", errPos: 0)
-  # Reserve the tape up front. Values average well over 16 source bytes, so
-  # src.len div 16 is a generous guess that still beats growing by doubling:
-  # every doubling copies the whole tape, and on a 10MB document that is
-  # several megabytes of pure memcpy before the parse has learned anything.
-  if src.len > 1024:
-    result.nodes = newSeqOfCap[JfNode](src.len div 16)
+proc addNode(doc: JsonDoc; n: JfNode) {.inline.} =
+  ## One 16-byte store in the common case. Growth doubles and copies, which is
+  ## why the initial reserve matters more than it looks.
+  if doc.count >= doc.nodes.len:
+    var bigger = newSeq[JfNode](doc.nodes.len * 2)
+    var k = 0
+    while k < doc.count:
+      bigger[k] = doc.nodes[k]
+      k = k + 1
+    doc.nodes = bigger
+  doc.nodes[doc.count] = n
+  doc.count = doc.count + 1
+
+proc parseInto*(doc: JsonDoc; src: string) =
+  ## Parse into an EXISTING document, reusing its tape.
+  ##
+  ## This is the shape a server wants and the reason it exists: `newSeq` zeroes
+  ## what it allocates, and after the allocator overhead was removed that memset
+  ## was 36% of the profile — paid again on every document. Reusing one parser
+  ## across many documents pays it once. The contract is simdjson's: the
+  ## previous document's values are invalidated by the next parse.
+  doc.src = src
+  doc.count = 0
+  doc.err = ""
+  doc.errPos = 0
+  # THE TAPE IS A MANUALLY GROWN BUFFER, not a seq being `add`ed to.
+  #
+  # Profiling said so: on a 1.3MB document, 26% of all instructions were
+  # mimalloc bookkeeping — `mi_usable_size`, `mi_page_decode_padding`,
+  # `_mi_arena_contains` — because nimony's `seq.add` asks the allocator about
+  # the block on EVERY append. At ~40k values that was ~390 instructions per
+  # value for what should be a 16-byte store.
+  #
+  # So: allocate once, write by index, and grow by hand on the rare miss. The
+  # reserve is deliberately not generous — `newSeq` zeroes what it allocates,
+  # and that memset was another 30% of the profile, so reserving twice what is
+  # needed costs twice the memset.
+  var cap = src.len div 32
+  if cap < 16: cap = 16
+  if doc.nodes.len < cap:
+    doc.nodes = newSeq[JfNode](cap)
   # The C scanners need a pointer to the bytes. `toCString` wants a mutable
-  # string, and the document already owns one: `result.src`, so no copy is made
+  # string, and the document already owns one: `doc.src`, so no copy is made
   # for the sake of the fast path. Bound unconditionally — guarding it with
   # `when not defined(jfPure)` left the pure build referring to an identifier
   # that did not exist, and the failure hid behind a stale test binary that
   # reported a clean sweep for code that had not compiled.
-  let cs = toCString(result.src)
+  let cs = toCString(doc.src)
   # NOTE: the parameter is indexed DIRECTLY. `var s = src` — the obvious
   # spelling — memcpy'd the whole document before parsing a byte of it, and
   # even `let s = src` kept part of that cost.
@@ -202,7 +235,7 @@ proc parse*(src: string): JsonDoc =
     if i < src.len and isWs(src[i]):
       i = int(jfSkipWs(cs, uint(src.len), 1'u))
   if i >= src.len:
-    fail(result, "empty document", 0)
+    fail(doc, "empty document", 0)
     return
 
   # The open-container stack: tape index of each container we are inside.
@@ -224,7 +257,7 @@ proc parse*(src: string): JsonDoc =
       if i < src.len and isWs(src[i]):
         i = int(jfSkipWs(cs, uint(src.len), uint(i + 1)))
     if i >= src.len:
-      if not done: fail(result, "unexpected end of input", i)
+      if not done: fail(doc, "unexpected end of input", i)
       break
     let c = src[i]
 
@@ -234,19 +267,19 @@ proc parse*(src: string): JsonDoc =
     of 1:
       if c == ',':
         let top = stack[stack.len - 1]
-        state = if result.nodes[top].kind == jfObject: 2 else: 0
+        state = if doc.nodes[top].kind == jfObject: 2 else: 0
         i = i + 1
         continue
       if c == ']' or c == '}':
         if stack.len == 0:
-          fail(result, "unexpected '" & c & "'", i)
+          fail(doc, "unexpected '" & c & "'", i)
           break
         let top = stack[stack.len - 1]
-        let want = if result.nodes[top].kind == jfObject: '}' else: ']'
+        let want = if doc.nodes[top].kind == jfObject: '}' else: ']'
         if c != want:
-          fail(result, "mismatched close", i)
+          fail(doc, "mismatched close", i)
           break
-        result.nodes[top].next = int32(result.nodes.len)
+        doc.nodes[top].next = int32(doc.count)
         discard stack.pop()
         i = i + 1
         if stack.len == 0:
@@ -255,15 +288,15 @@ proc parse*(src: string): JsonDoc =
           continue
         state = 1
         continue
-      fail(result, "',' or a close expected", i)
+      fail(doc, "',' or a close expected", i)
       break
 
     of 4:
-      fail(result, "trailing content after the document", i)
+      fail(doc, "trailing content after the document", i)
       break
     of 3:
       if c != ':':
-        fail(result, "':' expected", i)
+        fail(doc, "':' expected", i)
         break
       i = i + 1
       state = 0
@@ -272,10 +305,10 @@ proc parse*(src: string): JsonDoc =
     of 2:
       if c == '}':
         let top = stack[stack.len - 1]
-        if result.nodes[top].size > 0'i32:
-          fail(result, "trailing comma", i)
+        if doc.nodes[top].size > 0'i32:
+          fail(doc, "trailing comma", i)
           break
-        result.nodes[top].next = int32(result.nodes.len)
+        doc.nodes[top].next = int32(doc.count)
         discard stack.pop()
         i = i + 1
         if stack.len == 0:
@@ -285,14 +318,14 @@ proc parse*(src: string): JsonDoc =
         state = 1
         continue
       if c != '"':
-        fail(result, "a key string expected", i)
+        fail(doc, "a key string expected", i)
         break
       var key = JfNode(kind: jfString, esc: false, start: 0'i32, size: 0'i32,
                        next: 0'i32)
-      let e = scanString(result, src, cs, i, key)
+      let e = scanString(doc, src, cs, i, key)
       if e < 0: break
-      key.next = int32(result.nodes.len + 1)
-      result.nodes.add key
+      key.next = int32(doc.count + 1)
+      addNode(doc, key)
       i = e
       state = 3
       continue
@@ -304,19 +337,19 @@ proc parse*(src: string): JsonDoc =
     # state == 0: a value.
     if stack.len > 0:
       let top = stack[stack.len - 1]
-      result.nodes[top].size = result.nodes[top].size + 1'i32
+      doc.nodes[top].size = doc.nodes[top].size + 1'i32
 
     var node = JfNode(kind: jfNull, esc: false, start: int32(i), size: 0'i32,
                       next: 0'i32)
     case c
     of '{', '[':
       if stack.len >= MaxDepth:
-        fail(result, "nesting deeper than " & $MaxDepth, i)
+        fail(doc, "nesting deeper than " & $MaxDepth, i)
         break
       node.kind = if c == '{': jfObject else: jfArray
       node.size = 0'i32
-      stack.add int32(result.nodes.len)
-      result.nodes.add node
+      stack.add int32(doc.count)
+      addNode(doc, node)
       i = i + 1
       # An empty container closes immediately; otherwise expect a key or value.
       var j = i
@@ -327,7 +360,7 @@ proc parse*(src: string): JsonDoc =
           j = int(jfSkipWs(cs, uint(src.len), uint(j + 1)))
       if j < src.len and ((c == '{' and src[j] == '}') or (c == '[' and src[j] == ']')):
         let top = stack[stack.len - 1]
-        result.nodes[top].next = int32(result.nodes.len)
+        doc.nodes[top].next = int32(doc.count)
         discard stack.pop()
         i = j + 1
         if stack.len == 0:
@@ -339,47 +372,47 @@ proc parse*(src: string): JsonDoc =
       state = if c == '{': 2 else: 0
       continue
     of '"':
-      let e = scanString(result, src, cs, i, node)
+      let e = scanString(doc, src, cs, i, node)
       if e < 0: break
-      node.next = int32(result.nodes.len + 1)
-      result.nodes.add node
+      node.next = int32(doc.count + 1)
+      addNode(doc, node)
       i = e
     of 't':
       if not matches(src, i, "true"):
-        fail(result, "invalid literal", i)
+        fail(doc, "invalid literal", i)
         break
       node.kind = jfTrue
       node.size = 4'i32
-      node.next = int32(result.nodes.len + 1)
-      result.nodes.add node
+      node.next = int32(doc.count + 1)
+      addNode(doc, node)
       i = i + 4
     of 'f':
       if not matches(src, i, "false"):
-        fail(result, "invalid literal", i)
+        fail(doc, "invalid literal", i)
         break
       node.kind = jfFalse
       node.size = 5'i32
-      node.next = int32(result.nodes.len + 1)
-      result.nodes.add node
+      node.next = int32(doc.count + 1)
+      addNode(doc, node)
       i = i + 5
     of 'n':
       if not matches(src, i, "null"):
-        fail(result, "invalid literal", i)
+        fail(doc, "invalid literal", i)
         break
       node.kind = jfNull
       node.size = 4'i32
-      node.next = int32(result.nodes.len + 1)
-      result.nodes.add node
+      node.next = int32(doc.count + 1)
+      addNode(doc, node)
       i = i + 4
     else:
       if c == '-' or isDigit(c):
-        let e = scanNumber(result, src, i, node)
+        let e = scanNumber(doc, src, i, node)
         if e < 0: break
-        node.next = int32(result.nodes.len + 1)
-        result.nodes.add node
+        node.next = int32(doc.count + 1)
+        addNode(doc, node)
         i = e
       else:
-        fail(result, "a value expected", i)
+        fail(doc, "a value expected", i)
         break
     if stack.len == 0:
       done = true
@@ -387,12 +420,27 @@ proc parse*(src: string): JsonDoc =
     else:
       state = 1
 
-  if result.err.len == 0 and stack.len > 0:
-    fail(result, "unclosed container", src.len)
-  if result.err.len == 0 and not done:
-    fail(result, "no value in document", 0)
+  if doc.err.len == 0 and stack.len > 0:
+    fail(doc, "unclosed container", src.len)
+  if doc.err.len == 0 and not done:
+    fail(doc, "no value in document", 0)
+
+proc parse*(src: string): JsonDoc =
+  ## Parse into a fresh document. Convenient, and the right call for a one-off;
+  ## `parseInto` with a reused document is the one for a stream of them.
+  result = JsonDoc(src: "", nodes: @[], err: "", errPos: 0, count: 0)
+  parseInto(result, src)
+
+proc newJsonDoc*(): JsonDoc =
+  ## An empty document to reuse as a parser: `let p = newJsonDoc()` then
+  ## `parseInto(p, text)` per document.
+  JsonDoc(src: "", nodes: @[], err: "", errPos: 0, count: 0)
 
 proc ok*(doc: JsonDoc): bool = doc.err.len == 0
+
+proc valueCount*(doc: JsonDoc): int = doc.count
+  ## How many values the document holds. NOT `nodes.len`, which is the
+  ## capacity of the tape buffer rather than the part of it that is in use.
 
 proc root*(doc: JsonDoc): int32 = 0'i32
 

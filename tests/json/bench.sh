@@ -51,9 +51,11 @@ if [ -z "$BIN" ] || [ "$HERE/bench.nim" -nt "$BIN" ] || [ "$ROOT/src/jsonfast.ni
 fi
 if [ -n "$BIN" ]; then
   OUT="$("$BIN" "$FILE" "$ITER")"
-  row "jsonfast (tape)" "$(echo "$OUT" | awk '/throughput/{printf "%.0f", $2}')"
+  row "jsonfast (one-off)" "$(echo "$OUT" | awk '/^  throughput /{printf "%.0f", $2}')"
+  row "jsonfast (reused)" "$(echo "$OUT" | awk '/throughput-reused/{printf "%.0f", $2}')" \
+      "one parser over a stream of documents"
 else
-  row "jsonfast (tape)" "BUILD FAILED"
+  row "jsonfast" "BUILD FAILED"
 fi
 
 # --- CPython ---------------------------------------------------------------
