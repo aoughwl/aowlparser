@@ -1,7 +1,7 @@
 # cfgconsts — a config file becomes typed constants, at compile time
 
 ```sh
-nimony c --path:$PWD/src --path:$PWD/examples/cfgconsts examples/cfgconsts/demo.nim
+nimony c --path:$PWD/src --path:$PWD/examples/cfgconsts examples/cfgconsts/cfgdemo.nim
 ```
 
 `app.cfg` is parsed by aowlparser's `cfg-parsed` dialect **inside a nimony
