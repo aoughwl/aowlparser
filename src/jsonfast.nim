@@ -186,7 +186,10 @@ proc parse*(src: string): JsonDoc =
       break
     let c = src[i]
 
-    if state == 1:
+    # A jump table rather than an if-chain: every token pays for the chain, and
+    # the ordering that suits objects penalises arrays.
+    case state
+    of 1:
       if c == ',':
         let top = stack[stack.len - 1]
         state = if result.nodes[top].kind == jfObject: 2 else: 0
@@ -213,11 +216,10 @@ proc parse*(src: string): JsonDoc =
       fail(result, "',' or a close expected", i)
       break
 
-    if state == 4:
+    of 4:
       fail(result, "trailing content after the document", i)
       break
-
-    if state == 3:
+    of 3:
       if c != ':':
         fail(result, "':' expected", i)
         break
@@ -225,7 +227,7 @@ proc parse*(src: string): JsonDoc =
       state = 0
       continue
 
-    if state == 2:
+    of 2:
       if c == '}':
         let top = stack[stack.len - 1]
         if result.nodes[top].size > 0'i32:
@@ -252,6 +254,10 @@ proc parse*(src: string): JsonDoc =
       i = e
       state = 3
       continue
+
+    else:
+      discard
+    if state != 0: continue
 
     # state == 0: a value.
     if stack.len > 0:
