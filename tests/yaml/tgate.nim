@@ -81,13 +81,28 @@ expectCount(g, "a real entry after the scalar is found",
 expectCount(g, "a folded scalar swallows too",
   "s: >\n  - no\n", "item", 0)
 
-# --- shape: flow collections are not block structure ----------------------
-expectCount(g, "a dash inside a multi-line flow is not an item",
-  "a: [\n  - x,\n]\n", "item", 0)
-expectCount(g, "the flow continuation is one flow node",
-  "a: [\n  1,\n]\n", "flow", 1)
-expectCount(g, "a single-line flow opens no flow node",
-  "a: [1, 2]\n", "flow", 0)
+# --- shape: flow collections ------------------------------------------------
+# A flow collection is parsed, not swallowed: `{a: 1}` is an entry exactly as
+# `a: 1` is, which is what lets a consumer ask "what are the mapping entries?"
+# without caring which syntax was used.
+expectCount(g, "a flow sequence is one flow node", "a: [1, 2]\n", "flow", 1)
+expectCount(g, "its elements are items", "a: [1, 2]\n", "item", 2)
+expectCount(g, "a flow mapping's pairs are entries", "a: {x: 1, y: 2}\n",
+  "entry", 3)
+expectCount(g, "a multi-line flow is still one flow", "a: [\n  1,\n  2,\n]\n",
+  "flow", 1)
+expectCount(g, "a dash inside a flow is a scalar, not a block marker",
+  "a: [\n  - x,\n]\n", "marker", 0)
+expectCount(g, "one element even so", "a: [\n  - x,\n]\n", "item", 1)
+expectCount(g, "nested flow nests", "a: [[1], [2]]\n", "flow", 3)
+expectNesting(g, "nesting depth is two", "a: [[1]]\n", "flow", 2)
+expectCount(g, "a colon inside a flow scalar does not make an entry",
+  "a: [\"x: y\"]\n", "entry", 1)
+expectCount(g, "a bracket in a plain scalar is not a flow",
+  "note: see [1] below\n", "flow", 0)
+expectCount(g, "an unclosed flow is still one flow", "a: [1, 2\n", "flow", 1)
+expectCount(g, "a flow value under a key is that key's entry",
+  "a: {x: 1}\nb: 2\n", "entry", 3)
 
 # --- shape: quoting and comments ------------------------------------------
 expectCount(g, "a hash inside quotes is not a comment",

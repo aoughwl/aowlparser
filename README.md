@@ -185,17 +185,28 @@ canonical event stream per case, so `tests/yaml/tsuite.nim` checks the document
 count against it rather than against assertions written by whoever wrote the
 parser. That distinction is not academic — it is the whole reason the check
 exists. The dialect passed its own round-trip gate on all 2,112 YAML files on
-this machine, its own 78 hand-written shape assertions, and every truncation
-fuzz, **while getting the document count wrong in 20 of the suite's 255 cases**:
-a `%YAML`/`%TAG` directive was being read as an implicit document, and a `...`
+this machine, its own hand-written shape assertions, and every truncation fuzz,
+**while getting the document count wrong in 20 of the suite's 255 cases**: a
+`%YAML`/`%TAG` directive was being read as an implicit document, and a `...`
 with nothing open was opening the document it exists to close. Both bugs are
 invisible to `render(parse(s)) == s`, because the bytes come back either way.
 
-Only the document count is compared, and deliberately so: this is a
-concrete-syntax dialect, not a YAML loader — it does not resolve aliases, model
-flow collections as mappings, or fold block scalars, so `+MAP`/`+SEQ` counts
-would report differences that are the design rather than defects. A gate whose
-failures are mostly expected is a gate nobody reads.
+Two counts are compared — **documents** (255 cases) and **mapping keys** (179
+cases). The key count is the dialect's real structural claim, and widening it
+found seven more defects the round-trip could not: a tab after `:` is valid
+separation and was rejected (`- foo:<TAB>bar` was no mapping at all); a quote
+mid-scalar was read as a string opener (`bla"keks: foo`); a stray `]` in a plain
+scalar left the scan at depth -1; `{"foo":bar}` needs no space after the colon;
+a plain scalar inside a flow collection may continue on the next line; a comment
+may sit between a key and its colon; and `&anchor {x: 1}` is a flow mapping
+behind an anchor, not one opaque scalar.
+
+76 cases are **not** comparable on keys, and are excluded by name with the count
+printed: explicit `? ` keys, block scalar bodies, anchor names containing a
+colon, and a collection used as a key (`{a: 1}: v`). Those are the dialect's
+scope boundary, not defects — and an exclusion nobody sees reads exactly like a
+pass. A falsification control keeps the check honest: perturbing the expected
+count by one turns every comparison red.
 
 `src/jsonparser.nim` is the economy check: declaration, tokenizer, parser,
 renderer and all, in **one short file**, because everything except the JSON

@@ -120,10 +120,14 @@ proc keyCountComparable(src: string): bool =
   ##
   ## Anchors and aliases are NOT excluded: `*alias : scalar` is an entry to this
   ## dialect and a key to the oracle, which is the agreement being checked.
-  if hasAny(src, "[]{}"): return false
   var i = 0
   while i + 1 < src.len:
     if src[i] == '?' and src[i+1] == ' ': return false
+    # A COLLECTION used as a key — `{a: 1}: v`, `[x]:adjacent` — is a complex
+    # key, and this dialect does not model one: the collection is the key's
+    # text. Named here, and in yamlparser.nim's SCOPE, rather than quietly
+    # counted as agreement.
+    if (src[i] == '}' or src[i] == ']') and src[i+1] == ':': return false
     # An anchor or alias NAME may itself contain a colon (`&a:` / `*a:`), so
     # `&a: key: value` has one key and this dialect, which does not tokenize
     # anchor names, sees two. A named gap, not a silent one.
