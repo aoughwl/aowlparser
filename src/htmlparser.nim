@@ -25,7 +25,7 @@ include html_lex
 include html_parse
 
 proc htmlToAif*(src: string; diags: var seq[Diagnostic]): string =
-  var ps = HtmlParser(toks: tokenizeHtml(src), diags: @[], open: @[])
+  var ps = HtmlParser(toks: tokenizeHtml(src), diags: @[], open: @[], openLine: @[], openCol: @[])
   var b = nifbuilder.open(src.len * 3 + 64)
   parseDocument(ps, b)
   for d in ps.diags: diags.add d

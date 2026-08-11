@@ -16,6 +16,8 @@ type
     toks*: seq[HtmlTok]
     diags*: seq[Diagnostic]
     open*: seq[string]      ## names of currently open elements, outermost first
+    openLine*: seq[int32]   ## where each of those was opened, for diagnostics
+    openCol*: seq[int32]
 
 proc htTokAt(ps: HtmlParser; i: int): HtmlTok =
   if i < ps.toks.len: ps.toks[i]
@@ -155,6 +157,34 @@ proc parseEndTag(ps: var HtmlParser; b: var Builder; start: int;
 proc namesEqual(a, b: string): bool =
   lowerAscii(a) == lowerAscii(b)
 
+## Elements whose end tag is OPTIONAL in HTML. Real pages omit these constantly
+## — `<li>` items, table cells, paragraphs — so reporting them as unclosed would
+## bury a genuine `<div>` in noise and break the repo's zero-false-positive rule
+## on the 150-page corpus. Omitting their close tag is not an error; it is HTML.
+const OptionalEndTag = ["p", "li", "dt", "dd", "td", "th", "tr", "tbody",
+                        "thead", "tfoot", "option", "optgroup", "caption",
+                        "colgroup", "html", "head", "body", "rt", "rp"]
+
+proc endTagOptional(name: string): bool =
+  for o in OptionalEndTag:
+    if namesEqual(o, name): return true
+  return false
+
+proc unclosed(ps: var HtmlParser; idx: int; at: HtmlTok) =
+  ## An element that never got its end tag. Reported at the element's OPENING
+  ## position — that is the line the author has to edit — with the closing
+  ## context as the related location.
+  let name = ps.open[idx]
+  if endTagOptional(name): return
+  var d = Diagnostic(severity: sevError, code: "unclosed-element",
+                     message: "<" & name & "> is never closed",
+                     line: ps.openLine[idx], col: ps.openCol[idx],
+                     endCol: ps.openCol[idx] + int32(name.len) + 1'i32,
+                     fix: "insert </" & name & ">",
+                     relMsg: "still open here", relLine: at.line,
+                     relCol: at.col)
+  ps.diags.add d
+
 proc findOpen(ps: HtmlParser; name: string): int =
   ## Index of the innermost open element matching `name`, or -1.
   var i = ps.open.len - 1
@@ -201,6 +231,8 @@ proc parseDocument*(ps: var HtmlParser; b: var Builder) =
         b.endTree()
       else:
         ps.open.add name
+        ps.openLine.add htTokAt(ps, before).line
+        ps.openCol.add htTokAt(ps, before).col
     of htLtSlash:
       # The element an end tag closes is not known until its NAME is read, but
       # the `(etag)` subtree has to be emitted INSIDE that element — after the
@@ -215,12 +247,19 @@ proc parseDocument*(ps: var HtmlParser; b: var Builder) =
         # Implicitly close everything above the match (they get no etag).
         var d = ps.open.len - 1
         while d > target:
+          # Closed implicitly by an ancestor's end tag: the source never wrote
+          # one for this element.
+          unclosed(ps, d, htTokAt(ps, i))
           b.endTree()
           discard ps.open.pop()
+          discard ps.openLine.pop()
+          discard ps.openCol.pop()
           d = d - 1
         b.addRaw sub
         b.endTree()               # the matched element
         discard ps.open.pop()
+        discard ps.openLine.pop()
+        discard ps.openCol.pop()
       else:
         htErr(ps, "stray-end-tag",
               "end tag </" & endName & "> matches no open element",
@@ -235,7 +274,10 @@ proc parseDocument*(ps: var HtmlParser; b: var Builder) =
 
   # Anything still open at EOF closes here, with no etag — the source had none.
   while ps.open.len > 0:
+    unclosed(ps, ps.open.len - 1, htTokAt(ps, ps.toks.len))
     b.endTree()
     discard ps.open.pop()
+    discard ps.openLine.pop()
+    discard ps.openCol.pop()
 
   b.endTree()   # doc
