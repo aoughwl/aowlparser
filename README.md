@@ -187,8 +187,8 @@ Measured on this machine, best of 25, DOM-building and parse-only:
 
 | reader | 9.9MB catalog | 1.5MB source index | 1.3MB protocol |
 |---|---|---|---|
-| **jsonfast** (one-off) | **1377 MB/s** | **2065 MB/s** | **1442 MB/s** |
-| **jsonfast** (reused parser) | **1480 MB/s** | **2163 MB/s** | **1489 MB/s** |
+| **jsonfast** (one-off) | **1430 MB/s** | **2114 MB/s** | **1460 MB/s** |
+| **jsonfast** (reused parser) | **1516 MB/s** | **2219 MB/s** | **1497 MB/s** |
 | V8 `JSON.parse` (node 25) | 617 MB/s | 766 MB/s | 559 MB/s |
 | CPython `json` (C accelerated) | 217 MB/s | 274 MB/s | 296 MB/s |
 | `aowljson` (ref tree) | 166 MB/s | 331 MB/s | 194 MB/s |

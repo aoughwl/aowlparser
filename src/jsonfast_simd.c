@@ -15,6 +15,13 @@
  *
  * SSE2 is baseline on x86-64, so the vector path needs no runtime check. On any
  * other architecture the scalar fallback compiles instead and is still correct.
+ *
+ * AVX2 was TRIED and reverted. `target_clones("avx2","default")` compiles both
+ * and picks at load time, which is the correct way to use a non-baseline ISA —
+ * but it routes every call through an ifunc thunk, and these functions are
+ * called per token. The indirect call cost more than the wider block saved:
+ * 1377 -> 1272 MB/s on the 10MB catalog. Two 16-byte blocks per iteration gets
+ * the instruction-level parallelism without the indirection.
  */
 
 #include <stddef.h>
@@ -63,6 +70,23 @@ size_t jf_scan_string(const char *s, size_t n, size_t i) {
    * _mm_cmplt_epi8 gives us after biasing both sides. */
   const __m128i bias = _mm_set1_epi8((char)0x80);
   const __m128i ctl = _mm_set1_epi8((char)(0x20 ^ 0x80));
+  /* Two blocks per iteration: the compares of the second do not wait on the
+   * first, so the out-of-order engine has twice as much to work on. */
+  while (i + 32 <= n) {
+    __m128i v0 = _mm_loadu_si128((const __m128i *)(s + i));
+    __m128i v1 = _mm_loadu_si128((const __m128i *)(s + i + 16));
+    __m128i s0 = _mm_or_si128(
+        _mm_or_si128(_mm_cmpeq_epi8(v0, quote), _mm_cmpeq_epi8(v0, bslash)),
+        _mm_cmplt_epi8(_mm_xor_si128(v0, bias), ctl));
+    __m128i s1 = _mm_or_si128(
+        _mm_or_si128(_mm_cmpeq_epi8(v1, quote), _mm_cmpeq_epi8(v1, bslash)),
+        _mm_cmplt_epi8(_mm_xor_si128(v1, bias), ctl));
+    unsigned m0 = (unsigned)_mm_movemask_epi8(s0);
+    unsigned m1 = (unsigned)_mm_movemask_epi8(s1);
+    if (m0 != 0) return i + (size_t)__builtin_ctz(m0);
+    if (m1 != 0) return i + 16 + (size_t)__builtin_ctz(m1);
+    i += 32;
+  }
   while (i + 16 <= n) {
     __m128i v = _mm_loadu_si128((const __m128i *)(s + i));
     __m128i stop = _mm_or_si128(
