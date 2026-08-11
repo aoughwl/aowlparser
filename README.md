@@ -187,15 +187,17 @@ Measured on this machine, best of 25, DOM-building and parse-only:
 
 | reader | 9.9MB catalog | 1.5MB source index | 1.3MB protocol |
 |---|---|---|---|
-| **jsonfast (tape)** | **902 MB/s** | **1351 MB/s** | **687 MB/s** |
-| V8 `JSON.parse` (node 25) | 606 MB/s | 765 MB/s | 560 MB/s |
-| CPython `json` (C accelerated) | 208 MB/s | 268 MB/s | 298 MB/s |
-| `aowljson` (ref tree) | 165 MB/s | 336 MB/s | 196 MB/s |
+| **jsonfast** | **963 MB/s** | **2248 MB/s** | **1051 MB/s** |
+| V8 `JSON.parse` (node 25) | 613 MB/s | 794 MB/s | 559 MB/s |
+| CPython `json` (C accelerated) | 219 MB/s | 275 MB/s | 299 MB/s |
+| `aowljson` (ref tree) | 165 MB/s | 339 MB/s | 199 MB/s |
 
-`tests/json/bench.sh` runs that table. **It is not the fastest JSON parser in
-existence** — simdjson uses SIMD to do several bytes per instruction and lands
-in the GB/s range on the same shapes. This is the fastest thing here without
-intrinsics, and it beats the two readers most software actually runs through.
+`tests/json/bench.sh` runs that table: 1.6–2.8× V8 and 3.5–8.2× CPython on the
+same documents, and the string-heavy case is in the GB/s range where SIMD
+parsers live. It is **not** a simdjson clone — simdjson builds a two-stage
+structural index over the whole document and would still win on the object-heavy
+shapes — but the gap is now the parser's own bookkeeping rather than its
+scanning.
 
 Where the speed comes from, and what each choice costs:
 
@@ -211,6 +213,19 @@ Where the speed comes from, and what each choice costs:
 - **Pre-sized tape.** Growing by doubling copies the whole tape each time; on
   10MB that was 9% of the total runtime, spent on `memcpy` before the parse had
   learned anything.
+- **SIMD scanning for the two loops that consume nearly every byte** —
+  whitespace, and the run to a string's next `"`, `\` or control character —
+  sixteen bytes at a time in `src/jsonfast_simd.c`. Worth +7% on the
+  object-heavy catalog and **+67%** on the string-heavy index. It is pure
+  scanning: every grammar decision stays in the nimony source, so the C file can
+  only be wrong about where the next quote is, and 494k prefix comparisons would
+  say so. `-d:jfPure` drops it for a slower, identical, pure-nimony build — and
+  the gate is run both ways.
+
+  This is the one place aowlparser is not pure nimony, for a stated reason:
+  nimony rejects `addr s[i]`, so neither SIMD nor the word-at-a-time trick that
+  approximates it is expressible in the language today. Filed as an aowlsem
+  requirement.
 
 **Correctness is not asserted, it is measured.** `tests/json/tfast.nim` holds
 the reader to CPython's `json` module on **every `.json` file on this machine —

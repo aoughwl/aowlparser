@@ -35,6 +35,21 @@
 ## gate holds it to CPython's `json` module on every `.json` file on this
 ## machine, accept-or-reject and value-for-value.
 
+## SIMD scanning: `jsonfast_simd.c` finds the next interesting byte sixteen at a
+## time for the two loops that consume nearly every byte of a document. It is
+## pure scanning — every grammar decision stays here — and it exists because
+## nimony cannot take the address of a string's bytes, so the vector tricks are
+## not expressible in the language today (filed as an aowlsem requirement).
+##
+## Compile with `-d:jfPure` for the scalar loops only: a build that must stay
+## pure nimony (the JS backend, a non-x86 target without a C toolchain) gets a
+## slower parser and the identical answer, which the CPython gate checks both
+## ways.
+when not defined(jfPure):
+  {.compile: "jsonfast_simd.c".}
+  proc jfSkipWs(s: cstring; n, i: uint): uint {.importc: "jf_skip_ws".}
+  proc jfScanStr(s: cstring; n, i: uint): uint {.importc: "jf_scan_string".}
+
 type
   JfKind* = enum
     jfNull, jfFalse, jfTrue, jfInt, jfFloat, jfString, jfArray, jfObject
@@ -71,7 +86,8 @@ proc fail(doc: JsonDoc; msg: string; pos: int) =
     doc.err = msg
     doc.errPos = pos
 
-proc scanString(doc: JsonDoc; s: string; p: int; node: var JfNode): int =
+proc scanString(doc: JsonDoc; s: string; cs: cstring; p: int;
+                node: var JfNode): int =
   ## `p` is at the opening quote. Returns the index past the closing quote, or
   ## -1 on error. The body is NOT copied or unescaped here.
   var i = p + 1
@@ -79,6 +95,12 @@ proc scanString(doc: JsonDoc; s: string; p: int; node: var JfNode): int =
   node.start = int32(i)
   node.esc = false
   while i < s.len:
+    # Run to the next byte that can end the string: the closing quote, an
+    # escape, or a control character. This is where the document's bytes
+    # actually go, so it is the loop worth vectorising.
+    when not defined(jfPure):
+      i = int(jfScanStr(cs, uint(s.len), uint(i)))
+      if i >= s.len: break
     let c = s[i]
     if c == '"':
       node.size = int32(i) - node.start
@@ -163,11 +185,22 @@ proc parse*(src: string): JsonDoc =
   # several megabytes of pure memcpy before the parse has learned anything.
   if src.len > 1024:
     result.nodes = newSeqOfCap[JfNode](src.len div 16)
+  # The C scanners need a pointer to the bytes. `toCString` wants a mutable
+  # string, and the document already owns one: `result.src`, so no copy is made
+  # for the sake of the fast path. Bound unconditionally — guarding it with
+  # `when not defined(jfPure)` left the pure build referring to an identifier
+  # that did not exist, and the failure hid behind a stale test binary that
+  # reported a clean sweep for code that had not compiled.
+  let cs = toCString(result.src)
   # NOTE: the parameter is indexed DIRECTLY. `var s = src` — the obvious
   # spelling — memcpy'd the whole document before parsing a byte of it, and
   # even `let s = src` kept part of that cost.
   var i = 0
-  while i < src.len and isWs(src[i]): i = i + 1
+  when defined(jfPure):
+    while i < src.len and isWs(src[i]): i = i + 1
+  else:
+    if i < src.len and isWs(src[i]):
+      i = int(jfSkipWs(cs, uint(src.len), 1'u))
   if i >= src.len:
     fail(result, "empty document", 0)
     return
@@ -180,7 +213,16 @@ proc parse*(src: string): JsonDoc =
   var done = false
 
   while true:
-    while i < src.len and isWs(src[i]): i = i + 1
+    when defined(jfPure):
+      while i < src.len and isWs(src[i]): i = i + 1
+    else:
+      # GUARDED call. Compact JSON — most machine-generated JSON — has no
+      # whitespace between tokens at all, so calling the scanner per token was
+      # a cross-translation-unit call that immediately returned. gcc cannot
+      # inline it away, and at ~260k tokens the call overhead alone rivalled
+      # the parse. One compare answers the common case.
+      if i < src.len and isWs(src[i]):
+        i = int(jfSkipWs(cs, uint(src.len), uint(i + 1)))
     if i >= src.len:
       if not done: fail(result, "unexpected end of input", i)
       break
@@ -247,7 +289,7 @@ proc parse*(src: string): JsonDoc =
         break
       var key = JfNode(kind: jfString, esc: false, start: 0'i32, size: 0'i32,
                        next: 0'i32)
-      let e = scanString(result, src, i, key)
+      let e = scanString(result, src, cs, i, key)
       if e < 0: break
       key.next = int32(result.nodes.len + 1)
       result.nodes.add key
@@ -278,7 +320,11 @@ proc parse*(src: string): JsonDoc =
       i = i + 1
       # An empty container closes immediately; otherwise expect a key or value.
       var j = i
-      while j < src.len and isWs(src[j]): j = j + 1
+      when defined(jfPure):
+        while j < src.len and isWs(src[j]): j = j + 1
+      else:
+        if j < src.len and isWs(src[j]):
+          j = int(jfSkipWs(cs, uint(src.len), uint(j + 1)))
       if j < src.len and ((c == '{' and src[j] == '}') or (c == '[' and src[j] == ']')):
         let top = stack[stack.len - 1]
         result.nodes[top].next = int32(result.nodes.len)
@@ -293,7 +339,7 @@ proc parse*(src: string): JsonDoc =
       state = if c == '{': 2 else: 0
       continue
     of '"':
-      let e = scanString(result, src, i, node)
+      let e = scanString(result, src, cs, i, node)
       if e < 0: break
       node.next = int32(result.nodes.len + 1)
       result.nodes.add node
