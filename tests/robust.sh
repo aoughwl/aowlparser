@@ -50,5 +50,41 @@ for src in "$ROOT/tests/corpus"/*.nim; do
   done
 done
 
+# (4) THE READER ON THE COMMAND LINE. `jsonq` and `jsonlint` reach
+# src/jsonfast.nim, which the Nim gates never touch through the CLI — and a
+# command nobody runs in the gate is a command that rots. Exit CODES are the
+# contract here: CI steps branch on them.
+J="$WORK/q.json"
+printf '{"user":{"name":"ada"},"tags":["x","y"],"ok":true,"n":1.5e3,"deep":{"a":{"b":[0,{"c":"found"}]}}}' > "$J"
+
+expect() { # expect <label> <want-stdout> <want-rc> <args...>
+  local label="$1" want="$2" wantrc="$3"; shift 3
+  local got rc
+  got=$(timeout -s KILL 5 "$NP" "$@" 2>/dev/null); rc=$?
+  if [ "$got" != "$want" ] || [ "$rc" != "$wantrc" ]; then
+    echo "FAIL: $label — got '$got' rc=$rc, want '$want' rc=$wantrc"
+    fail=1
+  fi
+}
+
+expect "jsonq nested key"    "ada"     0 jsonq "$J" user.name
+expect "jsonq array index"   "y"       0 jsonq "$J" 'tags[1]'
+expect "jsonq deep mixed"    "found"   0 jsonq "$J" 'deep.a.b[1].c'
+expect "jsonq number keeps spelling" "1.5e3" 0 jsonq "$J" n
+expect "jsonq bool"          "true"    0 jsonq "$J" ok
+expect "jsonq container"     "[2 elements]" 0 jsonq "$J" tags
+expect "jsonq missing path"  ""        1 jsonq "$J" nope.deep
+expect "jsonq past the end"  ""        1 jsonq "$J" 'tags[9]'
+expect "jsonq malformed path" ""       2 jsonq "$J" 'tags[x]'
+expect "jsonq no path given" ""        2 jsonq "$J"
+expect "jsonlint accepts"    ""        0 jsonlint "$J"
+
+printf '{"a":1,}' > "$WORK/bad.json"
+expect "jsonlint rejects a trailing comma" "" 1 jsonlint "$WORK/bad.json"
+printf 'NaN' > "$WORK/nan.json"
+expect "jsonlint rejects NaN (not JSON)"   "" 1 jsonlint "$WORK/nan.json"
+printf '' > "$WORK/empty.json"
+expect "jsonlint rejects an empty file"    "" 1 jsonlint "$WORK/empty.json"
+
 if [ "$fail" -eq 0 ]; then echo "robust: no hangs/crashes"; else echo "robust: FAILURES above"; fi
 exit "$fail"

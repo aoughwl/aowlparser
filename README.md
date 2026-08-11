@@ -273,6 +273,26 @@ this machine's `.json` is full of live state, and Claude Code's own config
 rewrote itself during a sweep and made a correct parser look wrong by two
 integers.
 
+### On the command line
+
+The reader is reachable from a shell, not only from Nim — because that is where
+most JSON actually gets checked:
+
+```sh
+aowlparser jsonlint config.json          # RFC 8259 strict; exit 1 + line:col on error
+aowlparser jsonq api.json user.name      # extract one field
+aowlparser jsonq api.json 'items[2].id'  # dot-separated keys, [n] indices
+```
+
+`jsonlint` is stricter than most linters on purpose: `NaN`, `Infinity`, trailing
+commas and comments are **not** JSON, and a tool that quietly accepts them is
+how they end up in a file someone else's parser has to read. Exit codes are the
+contract — 0 valid, 1 invalid, 2 misuse — and `tests/robust.sh` pins them.
+
+`jsonq` prints a scalar as itself (numbers keep their spelling: `1.5e3` comes
+back `1.5e3`, not `1500.0`) and a container as its size, because dumping a
+subtree is `render`'s job.
+
 ### Using it with `aowljson`
 
 ```nim

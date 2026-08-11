@@ -25,6 +25,7 @@ import aifread, cssparser, htmlparser, pyparser, jsparser, jsonparser, vdsparser
 import mdparser
 import completeness
 import dialects
+import jsonfast
 import aowlparse/nodespec
 
 type
@@ -1690,7 +1691,7 @@ proc main() =
   if byCommand(action) < 0 and
      action != "p" and action != "parse" and action != "check" and
      action != "render" and action != "complete" and action != "auto" and
-     action != "dialects":
+     action != "dialects" and action != "jsonq" and action != "jsonlint":
     write stderr, "unknown command: " & action & "\n"
     usage()
   # `dialects` is self-describing: it prints the registry, including each
@@ -1782,6 +1783,86 @@ proc main() =
       quit 1
     let all = allDialects()
     effAction = all[idx].command
+
+  # --- the fast READER on the command line -----------------------------------
+  # `json` (the dialect) keeps every byte so a document round-trips; `jsonq` and
+  # `jsonlint` are the other trade — src/jsonfast.nim, which throws the
+  # whitespace away and reads at ~2 GB/s. Both are here because a reader that is
+  # only reachable from Nim is not reachable from a shell script, a Makefile or
+  # a CI step, which is where most JSON gets checked.
+  if action == "jsonlint":
+    let doc = parse(src)
+    if ok(doc):
+      quit 0
+    # The offset is the useful part: "invalid escape" without a position sends
+    # you searching a 10MB file by hand.
+    var line = 1
+    var col = 1
+    var k = 0
+    while k < doc.errPos and k < src.len:
+      if src[k] == '\n':
+        line = line + 1
+        col = 1
+      else:
+        col = col + 1
+      k = k + 1
+    write stderr, fileField & ":" & $line & ":" & $col & ": error: " &
+      doc.err & " (byte " & $doc.errPos & ")\n"
+    quit 1
+
+  if action == "jsonq":
+    if params.len < 3:
+      write stderr, "usage: aowlparser jsonq <file.json> <path>\n" &
+        "  path: dot-separated keys and [n] indices, e.g. user.name or items[2].id\n"
+      quit 2
+    let doc = parse(src)
+    if not ok(doc):
+      write stderr, "invalid JSON: " & doc.err & " at byte " & $doc.errPos & "\n"
+      quit 1
+    var cur = view(doc)
+    let path = params[2]
+    var i = 0
+    var seg = ""
+    var bad = false
+    # A tiny path walker rather than a query LANGUAGE: keys, indices, and the
+    # honesty to fail loudly on anything else instead of guessing.
+    while i <= path.len:
+      if i == path.len or path[i] == '.' or path[i] == '[':
+        if seg.len > 0:
+          cur = cur{seg}
+          seg = ""
+        if i < path.len and path[i] == '[':
+          var n = 0
+          var digits = 0
+          i = i + 1
+          while i < path.len and path[i] >= '0' and path[i] <= '9':
+            n = n * 10 + (int(path[i]) - int('0'))
+            digits = digits + 1
+            i = i + 1
+          if digits == 0 or i >= path.len or path[i] != ']':
+            bad = true
+            break
+          cur = cur.at(n)
+      elif path[i] != ']':
+        seg.add path[i]
+      i = i + 1
+    if bad:
+      write stderr, "malformed path: " & path & "\n"
+      quit 2
+    if not cur.valid:
+      write stderr, "no such path: " & path & "\n"
+      quit 1
+    # Scalars print as themselves; a container prints its size, because dumping
+    # a subtree is `render`'s job and this is a field extractor.
+    case kindOf(doc, cur.idx)
+    of jfString: write stdout, cur.str("") & "\n"
+    of jfInt, jfFloat: write stdout, rawLexeme(doc, cur.idx) & "\n"
+    of jfTrue: write stdout, "true\n"
+    of jfFalse: write stdout, "false\n"
+    of jfNull: write stdout, "null\n"
+    of jfArray: write stdout, "[" & $cur.len & " elements]\n"
+    of jfObject: write stdout, "{" & $cur.len & " members}\n"
+    quit 0
 
   # `complete` answers "could this be continued?" for a REPL or an editor —
   # the one question `check` deliberately cannot answer, because an empty-bodied
