@@ -67,7 +67,9 @@ type
     ## value type has destructors (filed to aowlsem). It is also the better
     ## shape — a document is shared by every view of it, and copying a tape by
     ## accident is exactly the mistake a value type invites.
-    src*: string
+    src*: string      ## the owned copy, empty when the document is BORROWED
+    data*: cstring    ## the bytes in use: into `src`, or the caller's buffer
+    dataLen*: int
     nodes*: seq[JfNode]
     count*: int       ## nodes actually used; `nodes` is a CAPACITY buffer
     err*: string      ## empty when the parse succeeded
@@ -87,7 +89,7 @@ proc fail(doc: JsonDoc; msg: string; pos: int) =
     doc.err = msg
     doc.errPos = pos
 
-proc scanString(doc: JsonDoc; s: string; cs: cstring; p: int;
+proc scanString(doc: JsonDoc; s: cstring; sLen: int; p: int;
                 node: var JfNode): int =
   ## `p` is at the opening quote. Returns the index past the closing quote, or
   ## -1 on error. The body is NOT copied or unescaped here.
@@ -95,26 +97,26 @@ proc scanString(doc: JsonDoc; s: string; cs: cstring; p: int;
   node.kind = jfString
   node.start = int32(i)
   node.esc = false
-  while i < s.len:
+  while i < sLen:
     # Run to the next byte that can end the string: the closing quote, an
     # escape, or a control character. This is where the document's bytes
     # actually go, so it is the loop worth vectorising.
     when not defined(jfPure):
-      i = int(jfScanStr(cs, uint(s.len), uint(i)))
-      if i >= s.len: break
+      i = int(jfScanStr(s, uint(sLen), uint(i)))
+      if i >= sLen: break
     let c = s[i]
     if c == '"':
       node.size = int32(i) - node.start
       return i + 1
     if c == '\\':
       node.esc = true
-      if i + 1 >= s.len: break
+      if i + 1 >= sLen: break
       let e = s[i+1]
       case e
       of '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
         i = i + 2
       of 'u':
-        if i + 5 >= s.len:
+        if i + 5 >= sLen:
           fail(doc, "truncated \\u escape", i)
           return -1
         var k = 0
@@ -137,40 +139,41 @@ proc scanString(doc: JsonDoc; s: string; cs: cstring; p: int;
   fail(doc, "unterminated string", p)
   return -1
 
-proc scanNumber(doc: JsonDoc; s: string; p: int; node: var JfNode): int =
+proc scanNumber(doc: JsonDoc; s: cstring; sLen: int; p: int;
+                node: var JfNode): int =
   ## RFC 8259 number grammar: `-? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE][+-]?[0-9]+)?`
   var i = p
   var isFloat = false
-  if i < s.len and s[i] == '-': i = i + 1
-  if i >= s.len or not isDigit(s[i]):
+  if i < sLen and s[i] == '-': i = i + 1
+  if i >= sLen or not isDigit(s[i]):
     fail(doc, "invalid number", p)
     return -1
   if s[i] == '0':
     i = i + 1
   else:
-    while i < s.len and isDigit(s[i]): i = i + 1
-  if i < s.len and s[i] == '.':
+    while i < sLen and isDigit(s[i]): i = i + 1
+  if i < sLen and s[i] == '.':
     isFloat = true
     i = i + 1
-    if i >= s.len or not isDigit(s[i]):
+    if i >= sLen or not isDigit(s[i]):
       fail(doc, "digit expected after '.'", i)
       return -1
-    while i < s.len and isDigit(s[i]): i = i + 1
-  if i < s.len and (s[i] == 'e' or s[i] == 'E'):
+    while i < sLen and isDigit(s[i]): i = i + 1
+  if i < sLen and (s[i] == 'e' or s[i] == 'E'):
     isFloat = true
     i = i + 1
-    if i < s.len and (s[i] == '+' or s[i] == '-'): i = i + 1
-    if i >= s.len or not isDigit(s[i]):
+    if i < sLen and (s[i] == '+' or s[i] == '-'): i = i + 1
+    if i >= sLen or not isDigit(s[i]):
       fail(doc, "digit expected in exponent", i)
       return -1
-    while i < s.len and isDigit(s[i]): i = i + 1
+    while i < sLen and isDigit(s[i]): i = i + 1
   node.kind = if isFloat: jfFloat else: jfInt
   node.start = int32(p)
   node.size = int32(i - p)
   return i
 
-proc matches(s: string; p: int; word: string): bool {.inline.} =
-  if p + word.len > s.len: return false
+proc matches(s: cstring; sLen, p: int; word: string): bool {.inline.} =
+  if p + word.len > sLen: return false
   var k = 0
   while k < word.len:
     if s[p + k] != word[k]: return false
@@ -190,18 +193,14 @@ proc addNode(doc: JsonDoc; n: JfNode) {.inline.} =
   doc.nodes[doc.count] = n
   doc.count = doc.count + 1
 
-proc parseInto*(doc: JsonDoc; src: string) =
-  ## Parse into an EXISTING document, reusing its tape.
-  ##
-  ## This is the shape a server wants and the reason it exists: `newSeq` zeroes
-  ## what it allocates, and after the allocator overhead was removed that memset
-  ## was 36% of the profile — paid again on every document. Reusing one parser
-  ## across many documents pays it once. The contract is simdjson's: the
-  ## previous document's values are invalidated by the next parse.
-  doc.src = src
+proc parseCore(doc: JsonDoc) =
+  ## The scanner. Reads `doc.data[0 ..< doc.dataLen]` and fills `doc.nodes`;
+  ## whether those bytes are owned or borrowed is the caller's business.
   doc.count = 0
   doc.err = ""
   doc.errPos = 0
+  let src = doc.data
+  let srcLen = doc.dataLen
   # THE TAPE IS A MANUALLY GROWN BUFFER, not a seq being `add`ed to.
   #
   # Profiling said so: on a 1.3MB document, 26% of all instructions were
@@ -214,7 +213,7 @@ proc parseInto*(doc: JsonDoc; src: string) =
   # reserve is deliberately not generous — `newSeq` zeroes what it allocates,
   # and that memset was another 30% of the profile, so reserving twice what is
   # needed costs twice the memset.
-  var cap = src.len div 32
+  var cap = srcLen div 32
   if cap < 16: cap = 16
   if doc.nodes.len < cap:
     doc.nodes = newSeq[JfNode](cap)
@@ -224,17 +223,16 @@ proc parseInto*(doc: JsonDoc; src: string) =
   # `when not defined(jfPure)` left the pure build referring to an identifier
   # that did not exist, and the failure hid behind a stale test binary that
   # reported a clean sweep for code that had not compiled.
-  let cs = toCString(doc.src)
   # NOTE: the parameter is indexed DIRECTLY. `var s = src` — the obvious
   # spelling — memcpy'd the whole document before parsing a byte of it, and
   # even `let s = src` kept part of that cost.
   var i = 0
   when defined(jfPure):
-    while i < src.len and isWs(src[i]): i = i + 1
+    while i < srcLen and isWs(src[i]): i = i + 1
   else:
-    if i < src.len and isWs(src[i]):
-      i = int(jfSkipWs(cs, uint(src.len), 1'u))
-  if i >= src.len:
+    if i < srcLen and isWs(src[i]):
+      i = int(jfSkipWs(src, uint(srcLen), 1'u))
+  if i >= srcLen:
     fail(doc, "empty document", 0)
     return
 
@@ -247,16 +245,16 @@ proc parseInto*(doc: JsonDoc; src: string) =
 
   while true:
     when defined(jfPure):
-      while i < src.len and isWs(src[i]): i = i + 1
+      while i < srcLen and isWs(src[i]): i = i + 1
     else:
       # GUARDED call. Compact JSON — most machine-generated JSON — has no
       # whitespace between tokens at all, so calling the scanner per token was
       # a cross-translation-unit call that immediately returned. gcc cannot
       # inline it away, and at ~260k tokens the call overhead alone rivalled
       # the parse. One compare answers the common case.
-      if i < src.len and isWs(src[i]):
-        i = int(jfSkipWs(cs, uint(src.len), uint(i + 1)))
-    if i >= src.len:
+      if i < srcLen and isWs(src[i]):
+        i = int(jfSkipWs(src, uint(srcLen), uint(i + 1)))
+    if i >= srcLen:
       if not done: fail(doc, "unexpected end of input", i)
       break
     let c = src[i]
@@ -322,7 +320,7 @@ proc parseInto*(doc: JsonDoc; src: string) =
         break
       var key = JfNode(kind: jfString, esc: false, start: 0'i32, size: 0'i32,
                        next: 0'i32)
-      let e = scanString(doc, src, cs, i, key)
+      let e = scanString(doc, src, srcLen, i, key)
       if e < 0: break
       key.next = int32(doc.count + 1)
       addNode(doc, key)
@@ -354,11 +352,11 @@ proc parseInto*(doc: JsonDoc; src: string) =
       # An empty container closes immediately; otherwise expect a key or value.
       var j = i
       when defined(jfPure):
-        while j < src.len and isWs(src[j]): j = j + 1
+        while j < srcLen and isWs(src[j]): j = j + 1
       else:
-        if j < src.len and isWs(src[j]):
-          j = int(jfSkipWs(cs, uint(src.len), uint(j + 1)))
-      if j < src.len and ((c == '{' and src[j] == '}') or (c == '[' and src[j] == ']')):
+        if j < srcLen and isWs(src[j]):
+          j = int(jfSkipWs(src, uint(srcLen), uint(j + 1)))
+      if j < srcLen and ((c == '{' and src[j] == '}') or (c == '[' and src[j] == ']')):
         let top = stack[stack.len - 1]
         doc.nodes[top].next = int32(doc.count)
         discard stack.pop()
@@ -372,13 +370,13 @@ proc parseInto*(doc: JsonDoc; src: string) =
       state = if c == '{': 2 else: 0
       continue
     of '"':
-      let e = scanString(doc, src, cs, i, node)
+      let e = scanString(doc, src, srcLen, i, node)
       if e < 0: break
       node.next = int32(doc.count + 1)
       addNode(doc, node)
       i = e
     of 't':
-      if not matches(src, i, "true"):
+      if not matches(src, srcLen, i, "true"):
         fail(doc, "invalid literal", i)
         break
       node.kind = jfTrue
@@ -387,7 +385,7 @@ proc parseInto*(doc: JsonDoc; src: string) =
       addNode(doc, node)
       i = i + 4
     of 'f':
-      if not matches(src, i, "false"):
+      if not matches(src, srcLen, i, "false"):
         fail(doc, "invalid literal", i)
         break
       node.kind = jfFalse
@@ -396,7 +394,7 @@ proc parseInto*(doc: JsonDoc; src: string) =
       addNode(doc, node)
       i = i + 5
     of 'n':
-      if not matches(src, i, "null"):
+      if not matches(src, srcLen, i, "null"):
         fail(doc, "invalid literal", i)
         break
       node.kind = jfNull
@@ -406,7 +404,7 @@ proc parseInto*(doc: JsonDoc; src: string) =
       i = i + 4
     else:
       if c == '-' or isDigit(c):
-        let e = scanNumber(doc, src, i, node)
+        let e = scanNumber(doc, src, srcLen, i, node)
         if e < 0: break
         node.next = int32(doc.count + 1)
         addNode(doc, node)
@@ -421,20 +419,52 @@ proc parseInto*(doc: JsonDoc; src: string) =
       state = 1
 
   if doc.err.len == 0 and stack.len > 0:
-    fail(doc, "unclosed container", src.len)
+    fail(doc, "unclosed container", srcLen)
   if doc.err.len == 0 and not done:
     fail(doc, "no value in document", 0)
 
-proc parse*(src: string): JsonDoc =
+
+proc parseInto*(doc: JsonDoc; src: sink string) =
+  ## Parse into an existing document, reusing its tape, TAKING OWNERSHIP of the
+  ## bytes.
+  ##
+  ## `sink` is the whole point: `parseInto(p, readFile(path))` moves the string
+  ## in rather than copying it. Copying the document into the doc cost 17-28%
+  ## of total parse time — more than any single optimisation in this file has
+  ## ever won — because it is a memcpy plus an allocation the size of the input.
+  ##
+  ## The contract is simdjson's: the previous document's values are invalidated
+  ## by the next parse into the same doc.
+  doc.src = src
+  doc.data = toCString(doc.src)
+  doc.dataLen = doc.src.len
+  parseCore(doc)
+
+proc parseBorrowed*(doc: JsonDoc; data: cstring; n: int) =
+  ## Parse bytes the CALLER owns: no copy at all, the fastest path there is.
+  ##
+  ## The document, and every view into it, borrows those bytes — the caller must
+  ## keep them alive and unmodified for as long as either is used. That is the
+  ## same contract simdjson's `parse(padded_string_view)` carries, and the same
+  ## hazard: this is the one function here that can hand you a dangling read, so
+  ## reach for `parseInto` unless the copy actually shows up in a profile.
+  doc.src = ""
+  doc.data = data
+  doc.dataLen = n
+  parseCore(doc)
+
+proc parse*(src: sink string): JsonDoc =
   ## Parse into a fresh document. Convenient, and the right call for a one-off;
   ## `parseInto` with a reused document is the one for a stream of them.
-  result = JsonDoc(src: "", nodes: @[], err: "", errPos: 0, count: 0)
+  result = JsonDoc(src: "", data: cstring(nil), dataLen: 0, nodes: @[],
+                   err: "", errPos: 0, count: 0)
   parseInto(result, src)
 
 proc newJsonDoc*(): JsonDoc =
   ## An empty document to reuse as a parser: `let p = newJsonDoc()` then
   ## `parseInto(p, text)` per document.
-  JsonDoc(src: "", nodes: @[], err: "", errPos: 0, count: 0)
+  JsonDoc(src: "", data: cstring(nil), dataLen: 0, nodes: @[], err: "",
+          errPos: 0, count: 0)
 
 proc ok*(doc: JsonDoc): bool = doc.err.len == 0
 
@@ -461,7 +491,7 @@ proc rawLexeme*(doc: JsonDoc; i: int32): string =
   result = ""
   var k = 0
   while k < int(n.size):
-    result.add doc.src[int(n.start) + k]
+    result.add doc.data[int(n.start) + k]
     k = k + 1
 
 proc hexVal(c: char): int {.inline.} =
@@ -497,17 +527,17 @@ proc getStr*(doc: JsonDoc; i: int32): string =
   if not n.esc:
     var k = a
     while k < b:
-      result.add doc.src[k]
+      result.add doc.data[k]
       k = k + 1
     return
   var k = a
   while k < b:
-    let c = doc.src[k]
+    let c = doc.data[k]
     if c != '\\':
       result.add c
       k = k + 1
       continue
-    let e = doc.src[k+1]
+    let e = doc.data[k+1]
     case e
     of '"': result.add '"'
     of '\\': result.add '\\'
@@ -518,15 +548,15 @@ proc getStr*(doc: JsonDoc; i: int32): string =
     of 'r': result.add '\r'
     of 't': result.add '\t'
     of 'u':
-      var cp = (hexVal(doc.src[k+2]) shl 12) or (hexVal(doc.src[k+3]) shl 8) or
-               (hexVal(doc.src[k+4]) shl 4) or hexVal(doc.src[k+5])
+      var cp = (hexVal(doc.data[k+2]) shl 12) or (hexVal(doc.data[k+3]) shl 8) or
+               (hexVal(doc.data[k+4]) shl 4) or hexVal(doc.data[k+5])
       k = k + 6
       # A surrogate PAIR is one code point; a lone surrogate is passed through
       # as U+FFFD rather than producing invalid UTF-8.
       if cp >= 0xD800 and cp <= 0xDBFF:
-        if k + 5 < b and doc.src[k] == '\\' and doc.src[k+1] == 'u':
-          let lo = (hexVal(doc.src[k+2]) shl 12) or (hexVal(doc.src[k+3]) shl 8) or
-                   (hexVal(doc.src[k+4]) shl 4) or hexVal(doc.src[k+5])
+        if k + 5 < b and doc.data[k] == '\\' and doc.data[k+1] == 'u':
+          let lo = (hexVal(doc.data[k+2]) shl 12) or (hexVal(doc.data[k+3]) shl 8) or
+                   (hexVal(doc.data[k+4]) shl 4) or hexVal(doc.data[k+5])
           if lo >= 0xDC00 and lo <= 0xDFFF:
             cp = 0x10000 + ((cp - 0xD800) shl 10) + (lo - 0xDC00)
             k = k + 6
@@ -547,12 +577,12 @@ proc getInt*(doc: JsonDoc; i: int32; default: int64 = 0): int64 =
   var k = int(n.start)
   let b = k + int(n.size)
   var neg = false
-  if k < b and doc.src[k] == '-':
+  if k < b and doc.data[k] == '-':
     neg = true
     k = k + 1
   var v: int64 = 0
   while k < b:
-    v = v * 10 + int64(int(doc.src[k]) - int('0'))
+    v = v * 10 + int64(int(doc.data[k]) - int('0'))
     k = k + 1
   if neg: -v else: v
 
@@ -680,7 +710,7 @@ proc find*(doc: JsonDoc; obj: int32; key: string): int32 =
       var same = true
       var j = 0
       while j < key.len:
-        if doc.src[int(n.start) + j] != key[j]:
+        if doc.data[int(n.start) + j] != key[j]:
           same = false
           break
         j = j + 1

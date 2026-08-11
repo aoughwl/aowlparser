@@ -54,6 +54,8 @@ if [ -n "$BIN" ]; then
   row "jsonfast (one-off)" "$(echo "$OUT" | awk '/^  throughput /{printf "%.0f", $2}')"
   row "jsonfast (reused)" "$(echo "$OUT" | awk '/throughput-reused/{printf "%.0f", $2}')" \
       "one parser over a stream of documents"
+  row "jsonfast (borrowed)" "$(echo "$OUT" | awk '/throughput-borrowed/{printf "%.0f", $2}')" \
+      "caller owns the bytes; no copy at all"
 else
   row "jsonfast" "BUILD FAILED"
 fi

@@ -75,6 +75,22 @@ while it < iterations:
   if bestReuse == 0.0 or dt < bestReuse: bestReuse = dt
   it = it + 1
 
+# The borrowed path: no copy of the document at all. The caller owns the bytes.
+var owned = src
+let bor = newJsonDoc()
+parseBorrowed(bor, toCString(owned), owned.len)
+var bestBorrow = 0.0
+it = 0
+while it < iterations:
+  let t0 = ticks(getMonoTime())
+  parseBorrowed(bor, toCString(owned), owned.len)
+  let dt = float64(ticks(getMonoTime()) - t0) / 1_000_000_000.0
+  if not ok(bor):
+    echo "REJECTED mid-benchmark: ", bor.err
+    quit 1
+  if bestBorrow == 0.0 or dt < bestBorrow: bestBorrow = dt
+  it = it + 1
+
 let mb = float64(src.len) / 1_048_576.0
 echo "jsonfast  ", args[0]
 echo "  bytes      ", src.len
@@ -83,3 +99,4 @@ echo "  best       ", best * 1000.0, " ms"
 echo "  throughput ", mb / best, " MB/s"
 echo "  reused     ", bestReuse * 1000.0, " ms"
 echo "  throughput-reused ", mb / bestReuse, " MB/s"
+echo "  throughput-borrowed ", mb / bestBorrow, " MB/s"

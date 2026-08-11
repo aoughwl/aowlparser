@@ -179,6 +179,36 @@ block:
   if v.valid: fail("invalid document view", "root should be invalid")
   check("chain off a failed parse", v{"a"}{"b"}.str("fb"), "fb")
 
+# --- the borrowed path ------------------------------------------------------
+block:
+  # parseBorrowed must agree with parseInto value for value: it is the same
+  # scanner over the same bytes, differing only in who owns them. If it did
+  # not, the fast path would be a second implementation nobody is testing.
+  var text = "{\"a\":[1,2,{\"b\":\"x\\ny\"}],\"c\":true}"
+  let owned = parse(text)
+  let borrowed = newJsonDoc()
+  parseBorrowed(borrowed, toCString(text), text.len)
+  checked = checked + 1
+  if valueCount(owned) != valueCount(borrowed):
+    fail("borrowed value count", $valueCount(owned) & " vs " &
+         $valueCount(borrowed))
+  else:
+    var same = true
+    var i = 0'i32
+    while int(i) < valueCount(owned):
+      if owned.nodes[i].kind != borrowed.nodes[i].kind or
+         owned.nodes[i].start != borrowed.nodes[i].start or
+         owned.nodes[i].size != borrowed.nodes[i].size or
+         owned.nodes[i].next != borrowed.nodes[i].next:
+        same = false
+        break
+      i = i + 1'i32
+    checked = checked + 1
+    if not same: fail("borrowed tape differs at node " & $i, "")
+  check("borrowed decodes strings",
+        view(borrowed){"a"}.at(2){"b"}.str(""), "x\ny")
+  check("borrowed finds keys", $view(borrowed){"c"}.boolean(false), "true")
+
 # --- the CPython manifest ---------------------------------------------------
 proc splitOn(s: string; sep: char): seq[string] =
   result = @[]
@@ -353,6 +383,35 @@ if args.len >= 1:
     if not ok(doc):
       fail("[json-oracle] " & path, "rejected: " & doc.err & " at " & $doc.errPos)
       continue
+    # The BORROWED path over the same bytes must produce the same tape. It is
+    # the same scanner with a different owner, and the one bug this caught —
+    # a key comparison still reading the owned copy, which a borrowed document
+    # does not have — was invisible to every other check and silent under
+    # -d:danger, where the out-of-bounds read does not assert.
+    var borrowSrc = lastSrc
+    let bdoc = newJsonDoc()
+    parseBorrowed(bdoc, toCString(borrowSrc), borrowSrc.len)
+    checked = checked + 1
+    if ok(bdoc) != ok(doc) or valueCount(bdoc) != valueCount(doc):
+      fail("[json-oracle] " & path & ": borrowed disagrees",
+           "owned " & $valueCount(doc) & " values, borrowed " &
+           $valueCount(bdoc))
+    else:
+      var bi = 0'i32
+      var bsame = true
+      while int(bi) < valueCount(doc):
+        if doc.nodes[bi].kind != bdoc.nodes[bi].kind or
+           doc.nodes[bi].start != bdoc.nodes[bi].start or
+           doc.nodes[bi].size != bdoc.nodes[bi].size or
+           doc.nodes[bi].next != bdoc.nodes[bi].next:
+          bsame = false
+          break
+        bi = bi + 1'i32
+      checked = checked + 1
+      if not bsame:
+        fail("[json-oracle] " & path & ": borrowed tape differs",
+             "at node " & $bi)
+
     var t = Tally(obj: 0, arr: 0, str: 0, num: 0, flt: 0, tru: 0, fls: 0,
                   nul: 0, shash: FnvOffset, isum: 0'u64)
     walk(doc, root(doc), t)

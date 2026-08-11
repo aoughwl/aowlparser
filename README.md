@@ -187,22 +187,32 @@ Measured on this machine, best of 25, DOM-building and parse-only:
 
 | reader | 9.9MB catalog | 1.5MB source index | 1.3MB protocol |
 |---|---|---|---|
-| **jsonfast** (one-off) | **1430 MB/s** | **2114 MB/s** | **1460 MB/s** |
-| **jsonfast** (reused parser) | **1516 MB/s** | **2219 MB/s** | **1497 MB/s** |
-| V8 `JSON.parse` (node 25) | 617 MB/s | 766 MB/s | 559 MB/s |
-| CPython `json` (C accelerated) | 217 MB/s | 274 MB/s | 296 MB/s |
-| `aowljson` (ref tree) | 166 MB/s | 331 MB/s | 194 MB/s |
+| **jsonfast** (borrowed, zero copy) | **2343 MB/s** | **2872 MB/s** | **1964 MB/s** |
+| **jsonfast** (reused parser) | 1784 MB/s | 2383 MB/s | 1710 MB/s |
+| **jsonfast** (one-off) | 1698 MB/s | 2249 MB/s | 1654 MB/s |
+| V8 `JSON.parse` (node 25) | 621 MB/s | 775 MB/s | 573 MB/s |
+| CPython `json` (C accelerated) | 225 MB/s | 270 MB/s | 312 MB/s |
+| `aowljson` (ref tree) | 167 MB/s | 343 MB/s | 199 MB/s |
 
-`tests/json/bench.sh` runs that table: **2.2–2.8× V8 and 5.0–7.9× CPython**, in
-the GB/s range on every shape. Both numbers are shown because they answer
-different questions — a one-off parse allocates and zeroes a fresh tape, while a
-server parsing a stream reuses one parser (`newJsonDoc` + `parseInto`) and pays
-that once. simdjson reports the reused figure; so do we, next to the cold one,
-so neither is hidden.
+`tests/json/bench.sh` runs that table: **3.4–3.8× V8 and 6.3–10.6× CPython** on
+the zero-copy path, and never below 1.6 GB/s on any of them.
+
+Three rows because they answer three different questions, and quoting only the
+best one would be marketing:
+
+- **borrowed** — `parseBorrowed`, the caller owns the bytes and nothing is
+  copied. This is the number comparable to simdjson's, which borrows the same
+  way, and it carries the same hazard: the document and its views die with the
+  buffer.
+- **reused** — `newJsonDoc` once, `parseInto` per document. What a server does.
+- **one-off** — `parse(text)` on its own. What a script does.
 
 It is still **not** a simdjson clone: simdjson builds a two-stage SIMD
 structural index over the whole document before parsing anything, which is a
-different architecture rather than a tuning gap.
+different architecture rather than a tuning gap. Measured, before deciding not
+to build it: that design's stage 1 alone runs at 2.4–3.1 GB/s here, and stage 2
+would then walk the ~8% of bytes it indexes — putting the whole thing near
+1.6–1.7 GB/s on the catalog, which the borrowed path already beats.
 
 Where the speed comes from, and what each choice costs:
 
@@ -218,6 +228,14 @@ Where the speed comes from, and what each choice costs:
 - **Pre-sized tape.** Growing by doubling copies the whole tape each time; on
   10MB that was 9% of the total runtime, spent on `memcpy` before the parse had
   learned anything.
+- **Not copying the document.** Worth **17–28%**, the largest single win here,
+  and invisible until a profile pointed at `memcpy` and `memset` sitting next to
+  each other. The parser takes its input by `sink`, so
+  `parseInto(p, readFile(path))` moves rather than copies, and `parseBorrowed`
+  skips ownership entirely.
+- **Reading through a byte pointer rather than a string.** Another **+11%**: one
+  code path serves owned and borrowed bytes alike, and it turned out to index
+  faster than nimony's string does.
 - **A hand-grown tape instead of `seq.add`.** Worth **+43%**, and found by
   profiling rather than intuition: nimony's `seq.add` asks the allocator about
   the block on every append, so 26% of all instructions were mimalloc
