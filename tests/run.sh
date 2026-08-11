@@ -108,6 +108,22 @@ if [ -d "$YAML_SUITE" ]; then
 else
   printf '  %-22s SKIPPED (no suite at %s)\n' "yaml suite oracle" "$YAML_SUITE"
 fi
+# CPython's own tokenizer as an oracle for `py-parsed` — token counts, logical
+# lines and indented suites. PY_ORACLE_FILES may name a file listing paths to
+# sweep instead of the corpus (3,492 files on this machine agree).
+if command -v python3 >/dev/null 2>&1; then
+  mkdir -p "$HERE/_work"
+  PY_MANIFEST="$HERE/_work/py-oracle.manifest"
+  if [ -n "${PY_ORACLE_FILES:-}" ]; then
+    python3 "$HERE/py/oracle.py" "$PY_MANIFEST" "@$PY_ORACLE_FILES" >/dev/null
+  else
+    python3 "$HERE/py/oracle.py" "$PY_MANIFEST" "$HERE"/py/corpus/*.py >/dev/null
+  fi
+  check "py oracle (CPython)" "$HERE/py/toracle.nim" "$PY_MANIFEST"
+else
+  printf '  %-22s SKIPPED (no python3)\n' "py oracle (CPython)"
+fi
+
 check "completeness"     "$HERE/tcompleteness.nim"
 
 echo "=== CLI round-trip (all dialects, real corpora) ==="
