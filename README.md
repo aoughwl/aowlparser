@@ -170,6 +170,7 @@ Each is a first-class parser, not a demo. All are byte-exact on real corpora:
 | `vds-parsed` | `aowlparser vds` | **1,224 MDN grammar strings** (the language CSS specs use) |
 | `md-parsed` | `aowlparser md` | **all 5,920 `.md`**, 6s |
 | `yaml-parsed` | `aowlparser yaml` | **all 2,112 `.yaml`/`.yml`**, 0.3s — *and* the official **yaml-test-suite**, 402 cases |
+| `cfg-parsed` | `aowlparser cfg` | **all 1,070 `.cfg`/`.ini`** on this machine |
 
 ```sh
 aowlparser auto file.py      # pick the dialect from the extension

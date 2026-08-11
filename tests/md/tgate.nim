@@ -94,7 +94,7 @@ for ci in 0 ..< cli.len:
   if ok:
     roundTrip(g, path, src)
   else:
-    echo "FAIL could not read ", path
+    failUnreadable(g, path)
 
 var fuzzBudget = 3
 if cli.len > fuzzBudget:

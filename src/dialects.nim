@@ -10,7 +10,7 @@
 import tokens
 import aowlparse/nodespec
 import cssparser, htmlparser, pyparser, jsparser, jsonparser, vdsparser,
-       mdparser, yamlparser
+       mdparser, yamlparser, cfgparser
 
 type
   DialectEntry* = object
@@ -41,6 +41,7 @@ proc pJson(src: string; diags: var seq[Diagnostic]): string = jsonToAif(src, dia
 proc pVds(src: string; diags: var seq[Diagnostic]): string = vdsToAif(src, diags)
 proc pMd(src: string; diags: var seq[Diagnostic]): string = mdToAif(src, diags)
 proc pYaml(src: string; diags: var seq[Diagnostic]): string = yamlToAif(src, diags)
+proc pCfg(src: string; diags: var seq[Diagnostic]): string = cfgToAif(src, diags)
 
 proc allDialects*(): seq[DialectEntry] =
   result = @[
@@ -72,6 +73,10 @@ proc allDialects*(): seq[DialectEntry] =
       exts: @[".yaml", ".yml"],
       summary: "YAML block structure; a block scalar's content is not YAML",
       parse: pYaml, render: renderYaml),
+    DialectEntry(name: "cfg-parsed", command: "cfg",
+      exts: @[".cfg", ".ini"],
+      summary: "ini/nim.cfg: sections, assignments, switches, @if conditionals",
+      parse: pCfg, render: renderCfg),
   ]
 
 proc lowerExt(path: string): string =
@@ -134,6 +139,7 @@ proc specOf*(cmd: string): Dialect =
   of "vds": vdsDialect()
   of "md": mdDialect()
   of "yaml": yamlDialect()
+  of "cfg": cfgDialect()
   else: Dialect(name: "", nodes: @[])
 
 proc byCommand*(cmd: string): int =

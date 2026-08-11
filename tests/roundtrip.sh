@@ -130,6 +130,12 @@ for f in "$HERE"/yaml/corpus/*.yml "$HERE"/yaml/corpus/*.yaml; do
   check_one "$f" "$(basename "$f")" yaml
 done
 
+echo "cfg-parsed:"
+for f in "$HERE"/cfg/corpus/*.cfg "$HERE"/cfg/corpus/*.ini; do
+  [ -e "$f" ] || continue
+  check_one "$f" "$(basename "$f")" cfg
+done
+
 echo "json-parsed:"
 for f in "$HERE"/json/corpus/*.json; do
   [ -e "$f" ] || continue

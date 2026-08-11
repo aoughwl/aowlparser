@@ -99,6 +99,16 @@ proc roundTrip*(g: var Gate; label, src: string) =
     fail(g, label & ": not byte-exact (first difference at byte " & $d & ")",
          "want: " & excerpt(src, d, 30) & "\n      got : " & excerpt(back, d, 30))
 
+proc failUnreadable*(g: var Gate; path: string) =
+  ## A file the gate was told to check and could not read.
+  ##
+  ## This exists because every dialect gate printed "FAIL could not read …" with
+  ## an `echo` and then EXITED ZERO: the word FAIL in the output, a clean tally
+  ## on the last line, and the harness reporting success. A file that silently
+  ## vanishes from a corpus sweep reads exactly like a file that passed.
+  g.checked = g.checked + 1
+  fail(g, "could not read " & path, "named on the command line but unreadable")
+
 proc expectCount*(g: var Gate; label, src, tag: string; want: int) =
   ## Check 4. Shape assertions are the only ones that can see a wrong tree.
   g.checked = g.checked + 1

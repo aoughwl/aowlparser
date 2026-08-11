@@ -97,6 +97,7 @@ check "json"             "$HERE/json/tgate.nim"
 check "vds"              "$HERE/vds/tgate.nim" corpus/mdn.vdscorpus
 check "md"               "$HERE/md/tgate.nim"
 check "yaml"             "$HERE/yaml/tgate.nim"
+check "cfg"              "$HERE/cfg/tgate.nim"
 
 # The yaml-test-suite is third-party truth (canonical event streams), and it is
 # NOT vendored — it ships with the NimYAML package. When it is absent the gate
