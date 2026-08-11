@@ -1684,10 +1684,11 @@ proc main() =
   if params.len < 1:
     usage()
   let action = params[0]
-  if action != "p" and action != "parse" and action != "check" and
-     action != "css" and action != "html" and action != "py" and
-     action != "js" and action != "json" and action != "vds" and
-     action != "md" and
+  # Document dialects are recognised from the REGISTRY, not from a list repeated
+  # here: a list would have to be edited alongside dialects.nim, and the two
+  # drifting apart is a "unknown command: yaml" for a dialect that exists.
+  if byCommand(action) < 0 and
+     action != "p" and action != "parse" and action != "check" and
      action != "render" and action != "complete" and action != "auto" and
      action != "dialects":
     write stderr, "unknown command: " & action & "\n"
@@ -1810,20 +1811,10 @@ proc main() =
   if action == "render":
     let dialect = dialectOf(src)
     var text = ""
-    if dialect == "css-parsed":
-      text = renderCss(src)
-    elif dialect == "html-parsed":
-      text = renderHtml(src)
-    elif dialect == "py-parsed":
-      text = renderPy(src)
-    elif dialect == "js-parsed":
-      text = renderJs(src)
-    elif dialect == "json-parsed":
-      text = renderJson(src)
-    elif dialect == "vds-parsed":
-      text = renderVds(src)
-    elif dialect == "md-parsed":
-      text = renderMd(src)
+    let ri = byDialectName(dialect)
+    if ri >= 0:
+      let all = allDialects()
+      text = all[ri].render(src)
     else:
       write stderr, "cannot render dialect: " &
         (if dialect.len > 0: dialect else: "<none>") & "\n"
@@ -1838,19 +1829,12 @@ proc main() =
         quit 1
     quit 0
 
-  if effAction == "css" or effAction == "html" or effAction == "py" or
-     effAction == "js" or effAction == "json" or effAction == "vds" or
-     effAction == "md":
+  let di = byCommand(effAction)
+  if di >= 0:
     var docDiags: seq[Diagnostic] = @[]
     var aif = ""
-    case effAction
-    of "css": aif = cssToAif(src, docDiags)
-    of "html": aif = htmlToAif(src, docDiags)
-    of "py": aif = pyToAif(src, docDiags)
-    of "json": aif = jsonToAif(src, docDiags)
-    of "vds": aif = vdsToAif(src, docDiags)
-    of "md": aif = mdToAif(src, docDiags)
-    else: aif = jsToAif(src, docDiags)
+    let all = allDialects()
+    aif = all[di].parse(src, docDiags)
     if diagFmt != dfOff and docDiags.len > 0:
       renderDiags(docDiags, fileField, diagFmt, stderr)
     var target = ""

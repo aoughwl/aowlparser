@@ -1,5 +1,10 @@
 # aowlparser
 
+> **Where this repo lives.** The canonical name is **aowlparser** (the remote is
+> `github.com/aoughwl/aowlparser`, the binary is `aowlparser`), but the local
+> checkout is `~/aifparser` and older references call it `nifparser`. All three
+> names mean this repo.
+
 A pure-**nimony** recursive-descent parser that turns Nim source into the
 parse-dialect AIF (`.p.aif`) the compiler frontend consumes — the same job as the
 classic compiler's `nifler`, but self-hosted and free of the classic Nim compiler,
@@ -163,6 +168,7 @@ Each is a first-class parser, not a demo. All are byte-exact on real corpora:
 | `json-parsed` | `aowlparser json` | **all 4,326 `.json`**, 8s |
 | `vds-parsed` | `aowlparser vds` | **1,224 MDN grammar strings** (the language CSS specs use) |
 | `md-parsed` | `aowlparser md` | **all 5,920 `.md`**, 6s |
+| `yaml-parsed` | `aowlparser yaml` | **all 2,112 `.yaml`/`.yml`**, 0.3s — *and* the official **yaml-test-suite**, 402 cases |
 
 ```sh
 aowlparser auto file.py      # pick the dialect from the extension
@@ -170,6 +176,26 @@ aowlparser dialects          # list every dialect and its node vocabulary
 tests/run.sh                 # THE gate: every dialect, the CLI, robustness,
                              # and the Nim differential, in one command
 ```
+
+### An outside oracle, where one exists
+
+`yaml-parsed` is the first document dialect with **third-party truth** available:
+the official [yaml-test-suite](https://github.com/yaml/yaml-test-suite) ships a
+canonical event stream per case, so `tests/yaml/tsuite.nim` checks the document
+count against it rather than against assertions written by whoever wrote the
+parser. That distinction is not academic — it is the whole reason the check
+exists. The dialect passed its own round-trip gate on all 2,112 YAML files on
+this machine, its own 78 hand-written shape assertions, and every truncation
+fuzz, **while getting the document count wrong in 20 of the suite's 255 cases**:
+a `%YAML`/`%TAG` directive was being read as an implicit document, and a `...`
+with nothing open was opening the document it exists to close. Both bugs are
+invisible to `render(parse(s)) == s`, because the bytes come back either way.
+
+Only the document count is compared, and deliberately so: this is a
+concrete-syntax dialect, not a YAML loader — it does not resolve aliases, model
+flow collections as mappings, or fold block scalars, so `+MAP`/`+SEQ` counts
+would report differences that are the design rather than defects. A gate whose
+failures are mostly expected is a gate nobody reads.
 
 `src/jsonparser.nim` is the economy check: declaration, tokenizer, parser,
 renderer and all, in **one short file**, because everything except the JSON

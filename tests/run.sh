@@ -96,6 +96,18 @@ check "js"               "$HERE/js/tgate.nim"
 check "json"             "$HERE/json/tgate.nim"
 check "vds"              "$HERE/vds/tgate.nim" corpus/mdn.vdscorpus
 check "md"               "$HERE/md/tgate.nim"
+check "yaml"             "$HERE/yaml/tgate.nim"
+
+# The yaml-test-suite is third-party truth (canonical event streams), and it is
+# NOT vendored — it ships with the NimYAML package. When it is absent the gate
+# says so out loud rather than passing silently: a missing oracle that reads as
+# green is exactly the failure this repo keeps finding elsewhere.
+YAML_SUITE="${YAML_SUITE:-/home/savant/.nimble/pkgcache/githubcom_flyxNimYAML/test/yaml-test-suite}"
+if [ -d "$YAML_SUITE" ]; then
+  check "yaml suite oracle"  "$HERE/yaml/tsuite.nim" "$YAML_SUITE"/*/
+else
+  printf '  %-22s SKIPPED (no suite at %s)\n' "yaml suite oracle" "$YAML_SUITE"
+fi
 check "completeness"     "$HERE/tcompleteness.nim"
 
 echo "=== CLI round-trip (all dialects, real corpora) ==="

@@ -10,7 +10,7 @@
 import tokens
 import aowlparse/nodespec
 import cssparser, htmlparser, pyparser, jsparser, jsonparser, vdsparser,
-       mdparser
+       mdparser, yamlparser
 
 type
   DialectEntry* = object
@@ -40,6 +40,7 @@ proc pJs(src: string; diags: var seq[Diagnostic]): string = jsToAif(src, diags)
 proc pJson(src: string; diags: var seq[Diagnostic]): string = jsonToAif(src, diags)
 proc pVds(src: string; diags: var seq[Diagnostic]): string = vdsToAif(src, diags)
 proc pMd(src: string; diags: var seq[Diagnostic]): string = mdToAif(src, diags)
+proc pYaml(src: string; diags: var seq[Diagnostic]): string = yamlToAif(src, diags)
 
 proc allDialects*(): seq[DialectEntry] =
   result = @[
@@ -67,6 +68,10 @@ proc allDialects*(): seq[DialectEntry] =
       exts: @[".md", ".markdown"],
       summary: "Markdown block structure; fenced code is not markup",
       parse: pMd, render: renderMd),
+    DialectEntry(name: "yaml-parsed", command: "yaml",
+      exts: @[".yaml", ".yml"],
+      summary: "YAML block structure; a block scalar's content is not YAML",
+      parse: pYaml, render: renderYaml),
   ]
 
 proc specOf*(cmd: string): Dialect =
@@ -85,6 +90,7 @@ proc specOf*(cmd: string): Dialect =
   of "json": jsonDialect()
   of "vds": vdsDialect()
   of "md": mdDialect()
+  of "yaml": yamlDialect()
   else: Dialect(name: "", nodes: @[])
 
 proc byCommand*(cmd: string): int =
