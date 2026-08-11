@@ -108,6 +108,23 @@ if [ -d "$YAML_SUITE" ]; then
 else
   printf '  %-22s SKIPPED (no suite at %s)\n' "yaml suite oracle" "$YAML_SUITE"
 fi
+# CPython's `json` as an oracle for the jsonfast READER: accept/reject on whole
+# files and on sampled prefixes, plus value counts and a digest of every decoded
+# string. JSON_ORACLE_FILES may name a file listing paths to sweep instead of
+# the corpus (10,029 files and ~494k prefix verdicts agree on this machine).
+if command -v python3 >/dev/null 2>&1; then
+  mkdir -p "$HERE/_work"
+  JSON_MANIFEST="$HERE/_work/json-oracle.manifest"
+  if [ -n "${JSON_ORACLE_FILES:-}" ]; then
+    python3 "$HERE/json/oracle.py" "$JSON_MANIFEST" "@$JSON_ORACLE_FILES" >/dev/null
+  else
+    python3 "$HERE/json/oracle.py" "$JSON_MANIFEST" "$HERE"/json/corpus/*.json >/dev/null
+  fi
+  check "jsonfast (CPython)" "$HERE/json/tfast.nim" "$JSON_MANIFEST"
+else
+  printf '  %-22s SKIPPED (no python3)\n' "jsonfast (CPython)"
+fi
+
 # CPython's own tokenizer as an oracle for `py-parsed` — token counts, logical
 # lines and indented suites. PY_ORACLE_FILES may name a file listing paths to
 # sweep instead of the corpus (3,492 files on this machine agree).

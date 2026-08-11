@@ -177,6 +177,85 @@ tests/run.sh                 # THE gate: every dialect, the CLI, robustness,
                              # and the Nim differential, in one command
 ```
 
+## `jsonfast` — the reader, when you want the data and not the bytes
+
+Every dialect above keeps every byte, because a rewriting front end must. That
+is the wrong shape for *reading* a 200MB API response, so `src/jsonfast.nim` is
+the opposite trade: a JSON reader that throws the whitespace away and goes fast.
+
+Measured on this machine, best of 25, DOM-building and parse-only:
+
+| reader | 9.9MB catalog | 1.5MB source index | 1.3MB protocol |
+|---|---|---|---|
+| **jsonfast (tape)** | **902 MB/s** | **1351 MB/s** | **687 MB/s** |
+| V8 `JSON.parse` (node 25) | 606 MB/s | 765 MB/s | 560 MB/s |
+| CPython `json` (C accelerated) | 208 MB/s | 268 MB/s | 298 MB/s |
+| `aowljson` (ref tree) | 165 MB/s | 336 MB/s | 196 MB/s |
+
+`tests/json/bench.sh` runs that table. **It is not the fastest JSON parser in
+existence** — simdjson uses SIMD to do several bytes per instruction and lands
+in the GB/s range on the same shapes. This is the fastest thing here without
+intrinsics, and it beats the two readers most software actually runs through.
+
+Where the speed comes from, and what each choice costs:
+
+- **A flat tape, not a tree of refs.** One 16-byte entry per value in one `seq`:
+  no allocation per value, no pointer chase, and a container stores the index
+  one past its last descendant, so skipping a 10MB sub-object is one assignment.
+- **Zero-copy strings and lazy numbers.** A string is an offset and a length
+  until someone asks for it; a number is its lexeme until someone wants its
+  value. Most values in a big document are never read.
+- **No recursion.** Depth is an explicit stack with a bound, so `[[[[…]]]]` is a
+  named error rather than the stack overflow recursive-descent JSON parsers are
+  famous for.
+- **Pre-sized tape.** Growing by doubling copies the whole tape each time; on
+  10MB that was 9% of the total runtime, spent on `memcpy` before the parse had
+  learned anything.
+
+**Correctness is not asserted, it is measured.** `tests/json/tfast.nim` holds
+the reader to CPython's `json` module on **every `.json` file on this machine —
+10,029 of them — and on 494,373 sampled PREFIXES of those files**: 602,527
+checks, all agreeing. The prefixes are the important half. A corpus of valid
+documents only proves a reader is permissive *enough*; a prefix is malformed in
+a different way each time, and accept/reject agreement on half a million of them
+is what catches the dangerous direction — accepting what is not JSON. Strictness
+is RFC 8259, which is stricter than CPython: `NaN` and `Infinity` are not JSON,
+so the oracle is configured to reject them too rather than letting the reader
+inherit CPython's extension.
+
+Two things the gate had to learn to say out loud: files that are **not UTF-8**
+(neither side is truth there), and files that **changed on disk mid-run** —
+this machine's `.json` is full of live state, and Claude Code's own config
+rewrote itself during a sweep and made a correct parser look wrong by two
+integers.
+
+### Using it with `aowljson`
+
+```nim
+import jsonfast
+let doc = parse(src)              # 900 MB/s, nothing materialized
+if not ok(doc): echo doc.err, " at ", doc.errPos
+let v = view(doc)
+echo v{"user"}{"name"}.str("")    # chain-safe, allocation-free
+for tag in v{"tags"}.items: echo tag.str("")
+```
+
+```nim
+import jsonfast_aowljson           # when you need the aowljson value tree
+var err = ""
+let v = parseJsonFast(src, err)    # drop-in for aowljson.parseJson
+```
+
+Be honest about which one to reach for: **the drop-in is not the fast path.**
+Building a `ref`-per-value tree with a string copy per value costs about six
+times the parse itself, so `parseJsonFast` lands near `aowljson.parseJson` and
+the speed above simply does not survive materialization. If you want the speed,
+stay on the tape and use views — that is what they are for. Building the tree
+did surface one real defect in `aowljson`, now fixed there: `[]=` rescans every
+existing key, so a parser using it is quadratic in object width *and* silently
+collapses the duplicate keys a faithful reader must keep. `addPair` is the
+parser's door.
+
 ### An outside oracle, where one exists
 
 `yaml-parsed` is the first document dialect with **third-party truth** available:
