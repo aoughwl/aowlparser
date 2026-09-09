@@ -16,6 +16,10 @@
 # Env overrides:
 #   NIFLER      path to native nifler   (default /home/savant/nimony/bin/nifler)
 #   NIFPARSER   path to aifparser       (default bin/aowlparser)
+#   CORPUS      directory of .nim cases (default tests/corpus). Point it at a
+#               foreign corpus (a sibling repo's, Nim/lib) to widen the oracle
+#               comparison without copying files into this repo.
+#   WORK        scratch directory       (default tests/_work)
 #
 # Dependency-light: bash + coreutils + python3.
 
@@ -27,8 +31,8 @@ ROOT="$(cd "$HERE/.." && pwd)"
 NIFLER="${NIFLER:-/home/savant/nimony/bin/nifler}"
 NIFPARSER="${NIFPARSER:-$ROOT/bin/aowlparser}"
 CANON="$HERE/canon.py"
-CORPUS="$HERE/corpus"
-WORK="$HERE/_work"
+CORPUS="${CORPUS:-$HERE/corpus}"
+WORK="${WORK:-$HERE/_work}"
 
 if [ ! -x "$NIFLER" ]; then
   echo "ERROR: native nifler oracle not found: $NIFLER" >&2
