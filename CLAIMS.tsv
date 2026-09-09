@@ -1,0 +1,40 @@
+# CLAIMS.tsv -- the numbers README.md states, and the command that printed each.
+#
+#   python3 tools/claimcheck.py            # the cheap rows
+#   python3 tools/claimcheck.py --all      # also the differential gates
+#   python3 tools/claimcheck.py --sweep    # numbers with no row here
+#
+# READ THIS FIRST IF THE GATES ALL COME BACK UNVERIFIABLE. They will on any
+# checkout without a built bin/aowlparser and a native nifler at the path
+# tests/diff.sh and tests/stress.sh look for -- which is a Linux path. Run here
+# on Windows they answer `total=225 pass=0 ... oracle-skip=225`: a zero that
+# means "no oracle", not "everything failed". Each of those rows therefore
+# carries a GUARD regex (`oracle-skip=[1-9]`) that turns that answer into
+# UNVERIFIABLE rather than a disagreement. Getting this wrong is not a detail:
+# a checker that read `pass=0` as a measurement would report 184/184 as WRONG,
+# and the next person to "fix" the README would write in a number no gate had
+# printed. That is the exact defect this file exists to stop.
+#
+# The one row that runs anywhere is the DENOMINATOR -- `ls tests/corpus/*.nim`.
+# It is also the row that caught the live defect: the README said "all 169
+# corpus programs pass -- 154 of them byte-for-byte" while the dialect table
+# eight sections down said 172/172, and the directory holds 172 files.
+#
+# UNATTRIBUTED rows fail the run on purpose; that class is where a number lives
+# when NO command produces it. Six of them are the jsonfast engineering notes and
+# the "full Nim compiler test corpus (2890 files)" paragraph. They are not
+# guessed at and not deleted here: they are listed, so the next person either
+# names a reproducer or removes the number.
+#
+# Columns: FILE <TAB> ANCHOR <TAB> CLASS <TAB> NUMBER <TAB> SOURCE <TAB> EXTRACT <TAB> GUARD
+README.md	the curated corpus is **172** programs	GATE	172	ls tests/corpus/*.nim | wc -l	^\s*(\d+)\s*$
+README.md	| `nim-parsed` | `aowlparser p` | 172/172 corpus	EXPENSIVE	172/172	bash tests/diff.sh	^corpus: (\d+)\s+PASS: (\d+)	oracle not found|ERROR:
+README.md	(184/184 nimony/src byte-exact	EXPENSIVE	184/184	bash tests/stress.sh ~/nimony/src	total=(\d+)\s+pass=(\d+)	oracle-skip=[1-9]|oracle not found
+README.md	105/105 nimony/lib	EXPENSIVE	105/105	bash tests/stress.sh ~/nimony/src/lib	total=(\d+)\s+pass=(\d+)	oracle-skip=[1-9]|oracle not found
+README.md	**all 310 of 310 `Nim/lib` files**	EXPENSIVE	310 of 310	bash tests/stress.sh ~/Nim/lib	total=(\d+)\s+pass=(\d+)	oracle-skip=[1-9]|oracle not found
+README.md	emits ~2× the error lines we do.	UNATTRIBUTED	~2×	no script in this repo counts error lines against nifler over any corpus. tests/diag.sh is the only diagnostics harness, prints no counts, and tests/run.sh does not even call it. Measure it with a named command or drop the number.
+README.md	the full Nim compiler test corpus (2890 files)	UNATTRIBUTED	2890	2890 appears nowhere outside this README. No script walks a Nim compiler test corpus. Same paragraph as the ~2x claim and the '~600 valid files' and 'we parse cleanly 6 files that crash nifler outright' claims: one anecdote, four numbers, no reproducer.
+README.md	**all 2,885 `.py` on this machine**, 8s	UNATTRIBUTED	8s	the same sweep is stated as 10s further down (in the py section). Two numbers for one measurement means neither was re-read. No script times the sweep; the tgate binary prints `py: N/M ok` and nothing else. Time it with a named command, or drop the duration.
+README.md	best of 25	UNATTRIBUTED	25	tests/json/bench.sh's default ITER is 20, and it prints `best of $ITER`. Either pass 25 in the documented invocation or state 20.
+README.md	let doc = parse(src)              # 900 MB/s	UNATTRIBUTED	900 MB/s	the throughput table in this same README gives the one-off path 1698 / 2249 / 1654 MB/s. 900 matches no row. It is a stale inline comment, and bench.sh is what would settle it.
+README.md	Worth **17–28%**, the largest single win here	UNATTRIBUTED	17–28%	an A/B taken by editing the source and re-running tests/json/bench.sh; the pre-change build no longer exists, so nothing here can reproduce it. Either keep a flag that restores the old path and name the two bench.sh invocations, or mark the whole optimisation section as a dated engineering note rather than a measurement.
