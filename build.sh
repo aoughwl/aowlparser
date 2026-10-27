@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
-# Build aowlparser — the pure-nimony parse front end (Nim source -> .p.aif).
+# Build aowlparser with the Nimony compiler -> bin/aowlparser.
 #
-# aowlparser is written in the language it parses, so it is built by nimony
-# rather than by classic Nim; that is why there was no build.sh here for a
-# while, and why `aowlup setup` reported "no build recipe" and skipped it.
+# `aowlup setup` runs this on a fresh machine; before it existed setup cloned
+# this repo, found no recipe, and every new install silently fell back to
+# nimony's nifler for the parser slot.
 #
-# It needs two search paths:
-#   src/                 its own modules (tokens, lexer, parser, the dialects)
-#   $NIMONY/src/lib      nifbuilder and friends, nimony's shared compiler library
-set -e
-
-NIMONY="${NIMONY_ROOT:-$HOME/nimony}"
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-
-NIMONY_BIN="$NIMONY/bin/nimony"
-[ -x "$NIMONY_BIN" ] || NIMONY_BIN="$NIMONY/bin/nimony.exe"
-[ -x "$NIMONY_BIN" ] || {
-  echo "aowlparser: nimony not found under $NIMONY (build it with: nim c -r src/hastur build all)" >&2
-  exit 1
-}
+# Runs FROM src/ with a bare filename: nimony resolves nimcache from the cwd,
+# and a --base: elsewhere builds nothing and exits 0. Success is judged by the
+# binary being NEWER than this run's start, not by its existing — a failed
+# rebuild leaves the previous binary in place.
+#
+# Overrides: NIMONY=/path/to/nimony  OPT=release|danger|none (default release)
+set -uo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NIMONY="${NIMONY:-$HOME/nimony/bin/nimony}"
+OPT="${OPT:-release}"
+LOCK="${NIMONY_BUILD_LOCK:-$HOME/.nimony-build.lock}"
+OUT="$ROOT/bin/aowlparser"
 
 # On Windows the msys2 ucrt64 toolchain must precede Git-for-Windows' /mingw64
 # on PATH, or gcc's cc1 loads its support DLLs from the wrong mingw and dies
@@ -26,18 +24,37 @@ NIMONY_BIN="$NIMONY/bin/nimony"
 case "$(uname -s)" in
   MINGW*|MSYS*)
     [ -d /c/msys64/ucrt64/bin ] && PATH="/c/msys64/ucrt64/bin:$PATH"
-    EXE=".exe"
+    OUT="$OUT.exe"
     ;;
-  *) EXE="" ;;
 esac
 export PATH
 
+[ -x "$NIMONY" ] || { echo "no nimony at $NIMONY (set NIMONY=)" >&2; echo "BUILD-FAIL"; echo "BUILD-DONE"; exit 1; }
 mkdir -p "$ROOT/bin"
+flags=()
+[ "$OPT" != "none" ] && flags+=("-d:$OPT")
+stamp="$(mktemp)"
 
-"$NIMONY_BIN" c \
-  -o:"$ROOT/bin/aowlparser$EXE" \
-  -p:"$ROOT/src" \
-  -p:"$NIMONY/src/lib" \
-  "$ROOT/src/aowlparser.nim"
+build() {
+  cd "$ROOT/src" && "$NIMONY" c "${flags[@]}" -o:"$OUT" aowlparser.nim 2>&1
+}
+run_locked() {
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$LOCK"
+    flock 9
+  fi
+  build
+}
 
-echo "built $ROOT/bin/aowlparser$EXE"
+log="$(run_locked)"; rc=$?
+if [ $rc -ne 0 ] || grep -qE '(^|[^a-zA-Z])Error:' <<<"$log" || [ ! "$OUT" -nt "$stamp" ]; then
+  echo "$log" | grep -E 'Error:' | head -20
+  [ "$OUT" -nt "$stamp" ] || echo "bin/aowlparser was not (re)written by this run"
+  rm -f "$stamp"
+  echo "BUILD-FAIL"; echo "BUILD-DONE"
+  exit 1
+fi
+rm -f "$stamp"
+echo "built $OUT"
+echo "BUILD-OK"
+echo "BUILD-DONE"

@@ -14,7 +14,13 @@ Its output is **byte-for-byte identical** to native `nifler` — save for one li
 it owns on purpose, the `(.vendor "aowlparser")` header (aowlparser stamps its own
 identity rather than impersonating `nifler`). The entire **nimony** source tree and
 standard library round-trip (184/184 nimony/src byte-exact, 105/105 nimony/lib
-structural parity), and all 169 corpus programs pass — 154 of them byte-for-byte.
+structural parity), and the curated corpus is **172** programs
+(`ls tests/corpus/*.nim | wc -l`) — `bash tests/diff.sh` prints the current
+pass and byte-exact split. This line used to read "all 169 corpus programs pass
+— 154 of them byte-for-byte", a score whose denominator had been left behind by
+three files while the table further down already said 172. Neither half is
+replaced with a guess here: the count is a `wc -l`, and the score belongs to
+the gate that prints it.
 
 Beyond nimony's own tree, aowlparser is validated against the **full upstream Nim
 standard library** by differential fuzzing: **all 310 of 310 `Nim/lib` files**
