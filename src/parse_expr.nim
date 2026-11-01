@@ -846,6 +846,10 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
         # `(() => (discard))`) is a StmtListExpr whose result is the statement
         # itself → `(expr (stmts) (var …))` / `(expr (stmts) (discard .))`.
         discard ps.parseStmt(b, int32(segLo), t.line, t.col, int32(rpIdx))
+      elif semis.len > 0 and ps.findAssign(segLo, rpIdx) >= 0:
+        # the LAST part of `(a = 1; b = 0)` is an assignment statement too; parsed as a
+        # bare expression range it silently lost its `= value`.
+        discard ps.parseStmt(b, int32(segLo), t.line, t.col, int32(rpIdx))
       else:
         ps.parseExprRange(b, int32(segLo), int32(rpIdx), t.line, t.col)
       b.endTree()   # expr
