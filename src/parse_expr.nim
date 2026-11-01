@@ -558,6 +558,10 @@ proc parsePrimaryRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32
     of "when":
       ps.parseIfExpr(b, lo, hi, pl, pc, false, "when")
       return
+    of "case":
+      # `f(case x of 1: a else: b)`: a case used directly as a value.
+      ps.parseCaseExpr(b, lo, hi, pl, pc)
+      return
     of "try":
       # `try: A except: B` as a direct expression is stmts-wrapped, like the
       # statement form (only the parenthesized StmtListExpr result is bare).
@@ -951,7 +955,7 @@ proc parseExprRangeImpl(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
       nx.kind == tkParLe or nx.kind == tkBracketLe or nx.kind == tkCurlyLe or
       nx.kind == tkColon or nx.kind == tkIdent or
       (nx.kind == tkOperator and nx.s == "=")
-  if head.kind == tkKeyword and (head.s == "if" or head.s == "when" or
+  if head.kind == tkKeyword and (head.s == "if" or head.s == "when" or head.s == "case" or
      head.s == "try" or procIsRoutine):
     ps.parsePrimaryRange(b, lo, hi, pl, pc)
     return
