@@ -1312,7 +1312,9 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
         if ped > 0: dec ped
       elif ped == 0 and pet.kind == tkKeyword and pet.s == "do": peHasDo = true; break
       inc pek
-  if hiLimit < 0 or peHasDo:
+  # A one-line body (`if c: x.build tag: discard`) still owns its trailing `: stmt` as the
+  # command's block argument — nifler parses it so — when the colon lies inside the bound.
+  if hiLimit < 0 or peHasDo or (pePcolon > startIdx and pePcolon < hiLimit):
     let lineHi = peLineHi
     let pcolon = pePcolon
     # A depth-0 `:` in a non-keyword statement is a command/do-block body,
