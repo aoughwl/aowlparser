@@ -80,8 +80,9 @@ proc typeExprEnd(ps: var Parser; lo: int): int =
         break
       elif t.kind == tkOperator and t.s == "=":
         break
-      elif t.line != startLine and t.indent >= 0 and not inProcReturn:
-        break
+      elif t.line != startLine and t.indent >= 0 and
+           not (inProcReturn and ps.tok(i - 1).kind == tkColon):
+        break                     # only the return type's FIRST token may wrap
     inc i
   result = i
 
