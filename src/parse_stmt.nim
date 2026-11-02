@@ -107,9 +107,14 @@ proc parseExprStmt(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32): int =
   ps.parseExprRange(b, lo, hi, pl, pc)
 
 proc parseReturnLike(ps: var Parser; b: var Builder; kwIdx: int; pl, pc: int32;
-                     tag: string): int =
+                     tag: string; hiLimit: int = -1): int =
   let kw = ps.tok(kwIdx)
-  let hi = ps.semiEnd(kwIdx, ps.lineEnd(kwIdx))
+  # `hiLimit` bounds the statement when it sits inside brackets (`f((discard 1))`,
+  # `(return x)`): without it the logical line runs past the closing `)` and a
+  # following block `:` (`if f((discard 1)):`) is mistaken for a postExprBlock.
+  var bound = ps.lineEnd(kwIdx)
+  if hiLimit >= 0 and hiLimit < bound: bound = hiLimit
+  let hi = ps.semiEnd(kwIdx, bound)
   b.addTree tag
   ps.emitInfo(b, kw.line, kw.col, pl, pc, false)
   if kwIdx + 1 < hi and startsExpr(ps.tok(kwIdx+1)):
@@ -1250,10 +1255,10 @@ proc parseOneStmt(ps: var Parser; b: var Builder; startIdx: int; pl, pc: int32;
     of "iterator": return ps.parseRoutine(b, startIdx, pl, pc, "iterator")
     of "macro": return ps.parseRoutine(b, startIdx, pl, pc, "macro")
     of "template": return ps.parseRoutine(b, startIdx, pl, pc, "template")
-    of "return": return ps.parseReturnLike(b, startIdx, pl, pc, "ret")
-    of "discard": return ps.parseReturnLike(b, startIdx, pl, pc, "discard")
-    of "raise": return ps.parseReturnLike(b, startIdx, pl, pc, "raise")
-    of "yield": return ps.parseReturnLike(b, startIdx, pl, pc, "yld")
+    of "return": return ps.parseReturnLike(b, startIdx, pl, pc, "ret", hiLimit)
+    of "discard": return ps.parseReturnLike(b, startIdx, pl, pc, "discard", hiLimit)
+    of "raise": return ps.parseReturnLike(b, startIdx, pl, pc, "raise", hiLimit)
+    of "yield": return ps.parseReturnLike(b, startIdx, pl, pc, "yld", hiLimit)
     of "asm": return ps.parseAsm(b, startIdx, pl, pc)
     of "import": return ps.parseImportLike(b, startIdx, pl, pc, "import")
     of "include": return ps.parseImportLike(b, startIdx, pl, pc, "include")

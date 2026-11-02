@@ -119,6 +119,9 @@ proc startsArg(ps: Parser; i, hi: int): bool =
   ## space the operator is infix (`c.len-1`), so it is not a command.
   let t = ps.tok(i)
   if t.kind == tkOperator:
+    # `=` is a reserved token for nifler: never a prefix operator, so `a.b =c`
+    # is an assignment, not the command call `a.b(=c)`.
+    if t.s == "=": return false
     if i + 1 >= hi: return false
     let prev = ps.tok(i - 1)
     let leadSpace = t.line != prev.line or t.col > prev.endCol
