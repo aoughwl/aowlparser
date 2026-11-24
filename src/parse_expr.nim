@@ -171,8 +171,13 @@ proc parseArgList(ps: var Parser; b: var Builder; lo, hi, pl, pc: int32) =
   let hiTrim = if int(hi) - 1 >= int(lo) and ps.tok(int(hi) - 1).kind == tkComma:
                  int(hi) - 1 else: int(hi)
   for ai in 0 ..< starts.len:
-    let aLo = starts[ai]
+    var aLo = starts[ai]
     let aHi = if ai + 1 < starts.len: starts[ai+1] - 1 else: hiTrim
+    # A standalone `##` doc comment written between the elements of a literal
+    # (`[\n  ## about these\n  "a", "b"]`) reaches here as a leading `tkComment`
+    # token of the slice. It is not part of the element: left in, the element read as
+    # an empty node and the real first element was lost.
+    while aLo < aHi and ps.tok(aLo).kind == tkComment: inc aLo
     if aLo < aHi:
       ps.parseArg(b, int32(aLo), int32(aHi), pl, pc)
 

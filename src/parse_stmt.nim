@@ -322,16 +322,30 @@ proc emitBody(ps: var Parser; b: var Builder; colonIdx: int; refIndent: int32;
     var hi = ps.lineEnd(bodyStart)
     block:
       var d = 0
+      var inl = 0     # inline `if`/`when`/`case` EXPRESSIONS opened in this body
       var k = bodyStart
       while k < hi:
         let kk = ps.tok(k)
         if isOpenBracket(kk.kind): inc d
         elif isCloseBracket(kk.kind):
           if d > 0: dec d
+        elif d == 0 and kk.kind == tkKeyword and k > bodyStart and
+             (kk.s == "if" or kk.s == "when" or kk.s == "case") and
+             ((ps.tok(k - 1).kind == tkKeyword and
+               (ps.tok(k - 1).s == "return" or ps.tok(k - 1).s == "yield" or
+                ps.tok(k - 1).s == "discard" or ps.tok(k - 1).s == "result")) or
+              (ps.tok(k - 1).kind == tkOperator and ps.tok(k - 1).s == "=") or
+              ps.tok(k - 1).kind == tkComma):
+          # an `if` in VALUE position (`return if a: x else: y`, `v = if …`): its own
+          # `else`/`elif` belong to it, not to the enclosing one-line statement.
+          inc inl
         elif d == 0 and kk.kind == tkKeyword and
              (kk.s == "elif" or kk.s == "else" or kk.s == "of" or
               kk.s == "except" or kk.s == "finally"):
-          hi = k; break
+          if inl > 0:
+            if kk.s == "else": dec inl
+          else:
+            hi = k; break
         inc k
     # A mid-line body whose line ENDS in a block-introducing `:` (`X: quote do:`
     # / `foo:`) has its own body on the following deeper-indented lines — it is
